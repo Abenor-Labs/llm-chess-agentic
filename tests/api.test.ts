@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { APICallError } from "ai";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { games, models, moves, tournament } from "@/db/schema";
+import { games, models, tournament } from "@/db/schema";
 import { POST as start, maxDuration as startMaxDuration } from "@/app/api/games/start/route";
 import { GET as tick, maxDuration as tickMaxDuration } from "@/app/api/cron/tick/route";
 import { GET as listGames } from "@/app/api/games/route";
@@ -11,10 +11,12 @@ import { POST as analysis } from "@/app/api/games/[id]/analysis/route";
 import { POST as destroy } from "@/app/api/games/destroy/route";
 import { GET as leaderboard } from "@/app/api/leaderboard/route";
 import { GET as accuracy } from "@/app/api/analytics/accuracy/route";
-import { POST as reset } from "@/app/api/tournament/reset/route";
 import { GAME_RULES } from "@/lib/config";
 import { endGame, processGame } from "@/lib/game-processor";
-import { hasDb, resetDb, createGame, getGame, getMoves, jsonRequest } from "./helpers";
+import { seedRoster } from "@/db/seed";
+import { readdirSync, statSync } from "fs";
+import { join } from "path";
+import { hasDb, resetDb, createGame, getGame, getMoves, getModel, jsonRequest } from "./helpers";
 
 vi.mock("ai", async (importOriginal) => {
   const actual = await importOriginal<typeof import("ai")>();
@@ -32,6 +34,35 @@ describe("route config", () => {
     expect(startMaxDuration).toBe(GAME_RULES.TICK_MAX_DURATION_S);
     expect(GAME_RULES.TICK_BUDGET_MS + GAME_RULES.PLY_DEADLINE_MS).toBeLessThan(GAME_RULES.TICK_MAX_DURATION_S * 1000);
     expect(GAME_RULES.PLY_DEADLINE_MS).toBeLessThan(GAME_RULES.CLAIM_STALE_MS);
+  });
+});
+
+describe("API surface", () => {
+  // The arena's history is the benchmark: nothing may wipe it. Any new route
+  // must be added here deliberately (and must not reset games or ratings).
+  it("exposes exactly the reviewed routes — and no reset", () => {
+    const root = join(process.cwd(), "src/app/api");
+    const routes: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const full = join(dir, name);
+        if (statSync(full).isDirectory()) walk(full);
+        else if (name === "route.ts") routes.push(dir.slice(root.length) || "/");
+      }
+    };
+    walk(root);
+    expect(routes.sort()).toEqual([
+      "/analytics/accuracy",
+      "/cron/tick",
+      "/games",
+      "/games/[id]",
+      "/games/[id]/analysis",
+      "/games/destroy",
+      "/games/start",
+      "/leaderboard",
+      "/providers",
+    ]);
+    expect(routes.some((r) => /reset|wipe|clear/i.test(r))).toBe(false);
   });
 });
 
@@ -248,33 +279,26 @@ describe.skipIf(!hasDb)("API routes (real database)", () => {
     });
   });
 
+  describe("seeding", () => {
+    it("never deletes games or touches ratings, even when re-run", async () => {
+      const game = await createGame({ whiteId: "local/engine-2", blackId: "local/random" });
+      await processGame(game, 0);
+      await endGame(game.id, "1-0", "Checkmate");
+      const before = await getModel("local/engine-2");
+      await seedRoster(db);
+      await seedRoster(db);
+      expect(await getGame(game.id)).toMatchObject({ status: "complete", result: "1-0" });
+      expect(await getMoves(game.id)).toHaveLength(1);
+      expect(await getModel("local/engine-2")).toEqual(before);
+    });
+  });
+
   describe("GET /api/leaderboard", () => {
     it("orders by rating", async () => {
       await db.update(models).set({ elo: 1700 }).where(eq(models.id, "local/engine-4"));
       const { models: rows } = await (await leaderboard()).json();
       expect(rows[0].id).toBe("local/engine-4");
       expect(rows.length).toBeGreaterThan(10);
-    });
-  });
-
-  describe("POST /api/tournament/reset", () => {
-    it("requires the admin token when configured, and wipes everything", async () => {
-      process.env.ADMIN_TOKEN = "secret";
-      const game = await createGame({ whiteId: "local/random", blackId: "local/greedy" });
-      await processGame(game, 0);
-      expect((await reset(jsonRequest("/api/tournament/reset"))).status).toBe(401);
-      expect((await reset(jsonRequest("/api/tournament/reset", undefined, { headers: { authorization: "Bearer wrong" } }))).status).toBe(401);
-      const ok = await reset(jsonRequest("/api/tournament/reset", undefined, { headers: { authorization: "Bearer secret" } }));
-      expect(ok.status).toBe(200);
-      expect(await db.select().from(games)).toHaveLength(0);
-      expect(await db.select().from(moves)).toHaveLength(0);
-    });
-
-    it("is disabled in production without a token", async () => {
-      delete process.env.ADMIN_TOKEN;
-      vi.stubEnv("NODE_ENV", "production");
-      expect((await reset(jsonRequest("/api/tournament/reset"))).status).toBe(403);
-      vi.unstubAllEnvs();
     });
   });
 });

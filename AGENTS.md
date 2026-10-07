@@ -7,7 +7,7 @@ Guidance for agents working in this repository. Architecture details: [docs/ARCH
 - `pnpm lint`, `pnpm typecheck` — must be clean (CI blocks on both)
 - `pnpm test` — unit tests (`src/**/*.test.ts`) plus database integration tests (`tests/**`). The DB project is skipped unless `TEST_DATABASE_URL` is set (put it in `.env.test`; the database is truncated between tests)
 - `pnpm test:e2e` — Playwright against a real server + DB. Locally it reuses `pnpm dev`; set `PLAYWRIGHT_BASE_URL` to target a running server and `PLAYWRIGHT_CHROMIUM_PATH` for a preinstalled Chromium
-- `pnpm db:migrate` / `pnpm db:seed` / `pnpm db:setup` — idempotent; `db:seed --reset` wipes games and ratings
+- `pnpm db:migrate` / `pnpm db:seed` / `pnpm db:setup` — idempotent and non-destructive
 - `pnpm simulate [white] [black] [--white-mode m] [--black-mode m]` — play a full match through the real processor
 
 A throwaway Postgres for tests: `docker compose up -d` (port 5434), or any local Postgres 16.
@@ -27,7 +27,8 @@ A throwaway Postgres for tests: `docker compose up -d` (port 5434), or any local
 ## Security posture
 
 - Keys are bring-your-own: stored per match (encrypted when `ENCRYPTION_KEY` is set), never returned by any API (`publicGameColumns`). Env keys are a self-hosting fallback; `/api/providers` exposes only booleans.
-- `/api/cron/tick`, `/api/games/start`, `/api/games/destroy` are intentionally ungated (browser-driven arena). `/api/tournament/reset` requires `ADMIN_TOKEN` (or development mode).
+- `/api/cron/tick`, `/api/games/start`, `/api/games/destroy` are intentionally ungated (browser-driven arena).
+- **There is no way to reset the arena** — no route, flag or script wipes games or ratings, by design. Don't add one; history is the benchmark. `destroy` only stops the single live game (deleting it only if it has no moves).
 
 ## Testing expectations
 

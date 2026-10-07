@@ -94,7 +94,6 @@ A compact 0x88 board with legal move generation, make/unmake and SAN (verified b
 | `POST /api/games/[id]/analysis` | Store Stockfish evals (once per game). |
 | `GET /api/leaderboard`, `GET /api/analytics/accuracy` | Ratings and accuracy aggregates. |
 | `GET /api/providers` | Which providers have a server fallback key (booleans only). |
-| `POST /api/tournament/reset` | Wipe games and ratings. Needs `ADMIN_TOKEN` (or development). |
 
 ## Data
 

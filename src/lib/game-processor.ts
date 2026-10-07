@@ -12,7 +12,8 @@ import { decryptSecret } from "./crypto";
 import { APIKeyError, ModelUnavailableError, RateLimitError } from "./errors";
 import { JudgeFailedError } from "./judge";
 
-type PlyOutcome = "moved" | "stop";
+/** "moved": applied, keep going. "ended": applied and the game is over. "stop": nothing applied. */
+type PlyOutcome = "moved" | "ended" | "stop";
 
 export interface ProcessSummary {
   /** Plies applied by this call. */
@@ -56,7 +57,7 @@ export async function processGame(
   try {
     while (true) {
       const outcome = await playOnePly(game.id, summary);
-      if (outcome === "moved") summary.plies++;
+      if (outcome !== "stop") summary.plies++;
       if (outcome !== "moved" || Date.now() >= deadline) break;
       // Refresh the claim between plies; if it was taken over, stop.
       const next = new Date();
@@ -108,7 +109,7 @@ async function setNote(gameId: string, note: string | null, extra: Partial<Game>
   await db.update(games).set({ statusNote: note, ...extra }).where(eq(games.id, gameId));
 }
 
-/** Plays a single ply. "moved" = a move was applied and the game continues. */
+/** Plays a single ply (see PlyOutcome). */
 async function playOnePly(gameId: string, summary: ProcessSummary): Promise<PlyOutcome> {
   const [game] = await db.select().from(games).where(eq(games.id, gameId));
   if (!game || game.status !== "active") return "stop";
@@ -227,7 +228,7 @@ async function playOnePly(gameId: string, summary: ProcessSummary): Promise<PlyO
 
   if (status.over) {
     await endGame(game.id, status.result, status.reason!);
-    return "stop";
+    return "ended";
   }
   return "moved";
 }

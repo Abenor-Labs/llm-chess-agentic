@@ -292,6 +292,16 @@ describe.skipIf(!hasDb)("game processor (real database)", () => {
     expect(g.resultReason).toMatch(/adjudicated for White/);
   });
 
+  it("counts the game-ending move in the tick summary", async () => {
+    // White mates in one with Qxf7#; the built-in engine finds it.
+    const fen = "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4";
+    const game = await createGame({ whiteId: "local/engine-2", blackId: "local/random", fen });
+    const summary = await processGame(game, 5_000);
+    expect(summary.plies).toBe(1);
+    expect(await getMoves(game.id)).toHaveLength(1);
+    expect(await getGame(game.id)).toMatchObject({ status: "complete", result: "1-0", resultReason: "Checkmate" });
+  });
+
   it("closes out a position that is already decided", async () => {
     const game = await createGame({ whiteId: "local/random", blackId: "local/random", fen: "7k/5Q2/6K1/8/8/8/8/8 b - - 0 1" });
     await processGame(game, 0);

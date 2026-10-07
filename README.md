@@ -50,7 +50,7 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | --- | --- |
 | `pnpm dev` / `pnpm build` / `pnpm start` | Next.js |
 | `pnpm db:migrate` | Apply `drizzle/*.sql` (idempotent, tracked in `_arena_migrations`) |
-| `pnpm db:seed` | Upsert the model roster (keeps ratings; `--reset` wipes games and ratings) |
+| `pnpm db:seed` | Upsert the model roster (never deletes games or ratings) |
 | `pnpm db:setup` | Both of the above |
 | `pnpm test` | Unit tests + database integration tests (the latter need `TEST_DATABASE_URL`) |
 | `pnpm test:unit` / `pnpm test:db` | One project only |

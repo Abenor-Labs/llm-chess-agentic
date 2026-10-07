@@ -1,16 +1,15 @@
 /**
- * Seeds the model roster. Non-destructive by default: upserts names/providers,
+ * Seeds the model roster. Non-destructive by design: upserts names/providers,
  * keeps ratings and history, and deactivates retired models (rows referenced by
- * past games can't be deleted). `--reset` wipes games, moves and ratings first.
+ * past games can't be deleted). There is deliberately no way to wipe the arena.
  *
- *   pnpm db:seed            # upsert roster
- *   pnpm db:seed --reset    # start the arena over
+ *   pnpm db:seed
  */
 import { config } from "dotenv";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { notInArray, sql } from "drizzle-orm";
-import { models, tournament, games, moves } from "./schema";
+import { notInArray } from "drizzle-orm";
+import { models, tournament } from "./schema";
 
 export const ROSTER: Array<{ id: string; name: string; provider: string }> = [
   // Built-in engines: no key needed; fixed anchors for the rating pool.
@@ -44,12 +43,7 @@ export const ROSTER: Array<{ id: string; name: string; provider: string }> = [
 
 type Db = ReturnType<typeof drizzle>;
 
-export async function seedRoster(db: Db, opts: { reset?: boolean } = {}) {
-  if (opts.reset) {
-    await db.delete(moves);
-    await db.delete(games);
-    await db.update(models).set({ elo: 1500, gamesPlayed: 0, wins: 0, losses: 0, draws: 0 });
-  }
+export async function seedRoster(db: Db) {
   for (const m of ROSTER) {
     await db
       .insert(models)
@@ -60,13 +54,7 @@ export async function seedRoster(db: Db, opts: { reset?: boolean } = {}) {
     .update(models)
     .set({ active: false })
     .where(notInArray(models.id, ROSTER.map((m) => m.id)));
-  await db
-    .insert(tournament)
-    .values({ id: 1 })
-    .onConflictDoUpdate({
-      target: tournament.id,
-      set: opts.reset ? { status: "stopped", tickCount: 0, startedAt: null } : { id: sql`${tournament.id}` },
-    });
+  await db.insert(tournament).values({ id: 1 }).onConflictDoNothing();
 }
 
 if (process.argv[1]?.endsWith("seed.ts")) {
@@ -77,9 +65,8 @@ if (process.argv[1]?.endsWith("seed.ts")) {
     process.exit(1);
   }
   const client = postgres(url, { max: 1 });
-  const reset = process.argv.includes("--reset");
-  seedRoster(drizzle(client), { reset })
-    .then(() => console.log(`Seeded ${ROSTER.length} models${reset ? " (arena reset)" : ""}.`))
+  seedRoster(drizzle(client))
+    .then(() => console.log(`Seeded ${ROSTER.length} models.`))
     .catch((err) => {
       console.error(err);
       process.exitCode = 1;
