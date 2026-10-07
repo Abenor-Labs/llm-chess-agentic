@@ -19,7 +19,7 @@ test.afterAll(async ({ request }) => {
   await request.post("/api/games/destroy", { data: {} });
 });
 
-test("plays a live engine match: moves stream in, navigation and stopping work", async ({ page }) => {
+test("quick start: two built-in engines play to a result, with a replay label while the board catches up", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
 
@@ -31,7 +31,29 @@ test("plays a live engine match: moves stream in, navigation and stopping work",
   // The game screen replaces setup and moves arrive.
   await expect(page.getByTestId("status-strip")).toBeVisible();
   await expect.poll(async () => page.getByTestId("move-list-item").count(), { timeout: 30_000 }).toBeGreaterThan(3);
+
+  // Fast engines finish on the server long before playback does: the strip
+  // must say REPLAYING (not LIVE) then, and "Skip to result" jumps to the end.
+  const skip = page.getByRole("button", { name: "Skip to result" });
+  await expect(page.getByTestId("replay-badge").or(page.getByTestId("result-banner"))).toBeVisible({ timeout: 60_000 });
+  if (await skip.isVisible()) await skip.click();
+  await expect(page.getByTestId("result-banner")).toBeVisible();
+  await expect(page.getByTestId("live-badge")).toHaveCount(0);
+
+  expect(errors).toEqual([]);
+});
+
+test("watches a live match: indicator, keyboard and list navigation, stopping", async ({ page, request }) => {
+  // Depth-4 engines take ~1-3s a move, so the game is reliably still live.
+  const res = await request.post("/api/games/start", { data: { modelIds: ["local/engine-4", "local/engine-4"] } });
+  expect(res.status(), await res.text()).toBe(400); // a model can't play itself
+  const ok = await request.post("/api/games/start", { data: { modelIds: ["local/engine-4", "local/engine-2"] } });
+  expect(ok.ok()).toBeTruthy();
+
+  await page.goto("/");
+  await expect(page.getByTestId("live-badge")).toBeVisible();
   await expect(page.getByTestId("live-indicator")).toBeVisible();
+  await expect.poll(async () => page.getByTestId("move-list-item").count(), { timeout: 45_000 }).toBeGreaterThan(2);
 
   // Keyboard navigation moves the board and the counter.
   await page.keyboard.press("Home");
@@ -45,13 +67,10 @@ test("plays a live engine match: moves stream in, navigation and stopping work",
   await page.getByTestId("move-list-item").nth(2).click();
   await expect(page.getByTestId("ply-counter")).toContainText(/^3 \//);
 
-  // Stop the match (if it hasn't already finished): it ends without a result.
+  // Stop the match: it ends without a result and never counts for ratings.
   page.once("dialog", (d) => d.accept());
-  const stop = page.getByTestId("stop-match");
-  if (await stop.isVisible()) await stop.click();
-  await expect(page.getByTestId("result-banner")).toBeVisible({ timeout: 30_000 });
-
-  expect(errors).toEqual([]);
+  await page.getByTestId("stop-match").click();
+  await expect(page.getByTestId("result-banner")).toContainText("Match stopped by user", { timeout: 30_000 });
 });
 
 test("finished games appear in history and open for replay", async ({ page, request }) => {

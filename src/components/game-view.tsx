@@ -146,6 +146,7 @@ export function GameView({ gameId, onNewGame, onGone }: GameViewProps) {
         analysis={analysis}
         onNewGame={onNewGame}
         stoppable={live}
+        onSkipToEnd={() => goTo(plies.length)}
         gameId={game.id}
         pgn={game.pgn}
       />
@@ -307,6 +308,7 @@ function StatusStrip({
   analysis,
   onNewGame,
   stoppable,
+  onSkipToEnd,
   gameId,
   pgn,
 }: {
@@ -321,8 +323,9 @@ function StatusStrip({
   plies: number;
   analysis: { done: number; total: number } | null;
   onNewGame?: () => void;
-  /** The server-side game is still running (the strip may show LIVE while playback catches up). */
+  /** The server-side game is still running (otherwise a "live" strip is a replay catching up). */
   stoppable: boolean;
+  onSkipToEnd?: () => void;
   gameId: string;
   pgn: string;
 }) {
@@ -375,13 +378,24 @@ function StatusStrip({
       )}
       data-testid="status-strip"
     >
-      {live ? (
-        <span className="inline-flex items-center gap-2 text-sm font-semibold text-rose-600">
+      {live && stoppable ? (
+        <span className="inline-flex items-center gap-2 text-sm font-semibold text-rose-600" data-testid="live-badge">
           <span className="relative flex h-2.5 w-2.5">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-75" />
             <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-rose-500" />
           </span>
           LIVE
+        </span>
+      ) : live ? (
+        // The game already ended on the server; the board is still catching up.
+        <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600" data-testid="replay-badge">
+          <span className="h-2.5 w-2.5 rounded-full bg-slate-400" />
+          REPLAYING
+          {onSkipToEnd && (
+            <button onClick={onSkipToEnd} className="ml-1 rounded-md px-2 py-0.5 text-xs font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50">
+              Skip to result
+            </button>
+          )}
         </span>
       ) : (
         <div className="min-w-0" data-testid="result-banner">
