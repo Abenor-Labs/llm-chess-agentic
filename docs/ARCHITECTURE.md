@@ -1,139 +1,106 @@
-# Architecture Overview
+# Architecture
 
-This document describes the architecture of the LLM Chess Tournament system.
+## Overview
 
-## System Components
+A Next.js 16 app (App Router) with PostgreSQL via Drizzle. There is no server-side scheduler: while someone is watching, the browser calls `/api/cron/tick` every few seconds, and each tick plays moves until its time budget is spent.
 
-### Frontend
-- **Framework**: Next.js 16 with App Router
-- **UI Library**: Tailwind CSS for styling
-- **State Management**: React hooks for local state, API calls for remote data
-- **Data Fetching**: Server-side rendering and client-side API calls; visibility-aware polling (`POLLING_INTERVALS`)
+```
+src/
+  app/                 pages (/, /game/[id], /games, /leaderboard) and API routes
+  components/          GameView (live/replay screen), MatchSetup, SidePanel, MoveList, Board, EvalBar, …
+  hooks/               useGameData, useAutoTick, useGamePlayback, useStockfish, useGameAnalysis
+  lib/
+    engine/            0x88 move generator + alpha-beta/quiescence search (perft-verified)
+    ai/                providers (effort mapping), prompt, response parsing, requestMove
+    judge.ts           turns a model's answers into a legal move it actually chose
+    players.ts         LLM players (via the judge) and built-in engine bots
+    game-processor.ts  claim → play plies → record → end game / rate
+    chess.ts           chess.js wrappers: history-aware status, move resolver, repetition helpers
+    modes.ts           skill modes
+    view-model.ts      pure helpers for the game screen
+  db/                  schema, lazy connection, roster seed
+drizzle/               idempotent SQL migrations (applied by scripts/migrate.ts)
+tests/                 database integration tests (real Postgres)
+e2e/                   Playwright, full stack
+```
 
-### Backend
-- **API Layer**: Next.js API routes in the App Router
-- **Business Logic**: Game processing, AI communication, skill modes, ELO, post-game analysis math
-- **Database Layer**: Drizzle ORM with PostgreSQL
+## The game loop
 
-### AI Integration
-- **Direct providers** (non-streaming `generateText`): Groq, Google Gemini, Anthropic, OpenAI — keyed by model id prefix (`groq/`, `google/`, `anthropic/`, `openai/`)
-- **AI Gateway fallback** (`streamText` + early parse) for unrecognized prefixes; optional `AI_GATEWAY_API_KEY` / Vercel OIDC
-- **Gemini specifics**: 3+ models use `providerOptions.google.thinkingConfig.thinkingLevel: "low"` and a larger output budget; 2.x omit thinking options
-- **Validation Layer**: Judge in `game-processor` validates against chess.js, optional engine candidate lists, and blunder guards
+`processGame` (in `game-processor.ts`):
 
-## Core Modules
+1. **Claim** the game with a conditional `UPDATE … RETURNING` on `games.processing` / `processing_started_at`. Only one caller can claim an active game whose claim is clear or older than `CLAIM_STALE_MS`, so concurrent ticks (several tabs, serverless instances) never double-move. The claim is refreshed between plies and released only by its owner.
+2. **Play plies** back-to-back until `TICK_BUDGET_MS` is spent or a ply stops the loop. Each ply has a hard deadline (`PLY_DEADLINE_MS`, enforced with an `AbortSignal` that cancels the HTTP request).
+3. **Record** each move in one transaction: the position update is guarded on the FEN the move was computed for (and on the game still being active), and the move row is inserted only if that update succeeded. A stopped game or a lost race leaves no phantom move.
+4. **End** the game in a transaction that flips `status` conditionally (so it can only happen once) and, for rated games, updates both models' ELO with row locks.
 
-### Game Processing
-The game processor ([src/lib/game-processor.ts](../src/lib/game-processor.ts)) manages the lifecycle of chess games:
+The timeline invariants (`TICK_BUDGET_MS + PLY_DEADLINE_MS < maxDuration`, `PLY_DEADLINE_MS < CLAIM_STALE_MS`) are asserted in tests.
 
-1. Atomically **claims** the game (`UPDATE` `processing` / `processingStartedAt`) so overlapping ticks cannot double-move
-2. Plays plies in a loop until the game ends, a ply fails, or `TICK_BUDGET_MS` (25s) is spent
-3. Resolves skill mode from `whiteMode` / `blackMode` and scores legal moves with the engine scorer
-4. Requests a move from the side-to-move model (with judge retries)
-5. Validates and applies the move; updates FEN/PGN/moves
-6. On completion, updates ELO; releases the processing claim
-7. Separately, completed games may be analyzed client-side (Stockfish) and persisted via the analysis API
+### History
 
-### Skill Modes
-Defined in [src/lib/modes.ts](../src/lib/modes.ts). Modes: `novice`, `apprentice`, `scholar` (default), `strategist`, `virtuoso`, `grandmaster`. Each sets:
+Move history is rebuilt from the `moves` table (ordered by `move_number, color`) and replayed in chess.js, so threefold repetition and the fifty-move rule are detected. The stored PGN is the full movetext. If history doesn't reproduce the stored FEN (legacy rows), play continues from the FEN.
 
-| Knob | Role |
-|------|------|
-| `temperature` | Sampling temperature for the provider call |
-| `candidateLimit` | If set, model must pick from top-N engine-scored moves |
-| `blunderThresholdCp` | If set, one warn-and-retry when loss vs best ≥ threshold |
-| `persona` | Prompt personality string |
+### Failure handling
 
-Persisted per game as `games.white_mode` / `games.black_mode` (migration `0008`).
+| Failure | Outcome |
+| --- | --- |
+| Missing / rejected key, model not found | No moves yet → the match is deleted (start route reports why). Otherwise → ended with no result ("Match cancelled"), unrated. |
+| Rate limit (429) | First move → deleted with the reason. Mid-game → a status note ("rate limited — retrying") and the next tick tries again; no penalty. |
+| Timeout, unreadable answer, no legal move after all judge attempts | A warning for that side (shown in the UI). More than `MAX_TIMEOUT_WARNINGS` consecutive failures forfeits. A successful move clears the count. |
+| Game exceeds `GAME_TIME_LIMIT_MS` | Engine adjudication: a decisive edge (≥ a rook, or forced mate) wins; otherwise a draw. |
 
-### Engine Scorer
-[src/lib/engine.ts](../src/lib/engine.ts) — depth-2 material-only negamax with alpha-beta, capture/promotion move ordering, `MATE_SCORE`, and a small positional opening **tiebreak** (center / development / castling) so quiet positions are not arbitrarily ordered. Used to ground skill modes; **not** Stockfish.
+## The judge (`judge.ts`)
 
-### AI Communication
-The AI module ([src/lib/ai.ts](../src/lib/ai.ts)) handles communication with LLM providers:
+The judge's job is to get the *model's* decision onto the board:
 
-- **Request Building**: Prompts include board ASCII, material, PGN, persona, and optional scored candidates
-- **Response Parsing**: Multiple fallback strategies via `parseAIResponse()`
-- **Error Handling**: Typed `APIKeyError` / `RateLimitError` / `TimeoutError` / `ParseError`
-- **Transport**: Non-streaming for the four direct providers; Gateway path streams
+- **Notation is forgiven.** `resolveMove` maps UCI, long algebraic, `0-0`, lowercase pieces, missing/extra `x`, check/annotation suffixes and a missing `=Q` onto the unique legal move — and never guesses between two.
+- **Illegal / unreadable answers** get specific feedback (the legal list, "you are in check") and another attempt.
+- **Blunder guard** (per mode): if the engine rates the move at least `blunderGuardCp` worse than the best, the model is asked once to reconsider, with the opponent's refuting reply. Its second answer stands, even if it's the same move.
+- **Repetition guard:** a clearly winning side gets one warning before completing a threefold repetition.
+- **Fallback:** if later attempts fail, the earlier legal proposal is played.
 
-### Chess Logic
-The chess module ([src/lib/chess.ts](../src/lib/chess.ts)) wraps chess.js:
+Everything the judge did is stored as structured events in `moves.judge` and shown in the side panel.
 
-- **Move Validation**: Ensures moves are legal
-- **Position Updates**: Applies moves and updates FEN / PGN (including correct PGN load for game-over detection)
-- **Game State**: Checkmate, stalemate, draws
-- **Legal Moves**: Generates all legal moves from a position
+## Players and modes
 
-### Post-Game Analysis
-- Math: [src/lib/analysis.ts](../src/lib/analysis.ts) — per-move `cpLoss` / accuracy; aggregates ACPL / blunder rate
-- Client: Stockfish worker (`use-game-analysis` / `use-stockfish`) evaluates plies, then `POST /api/games/[id]/analysis`
-- Persists `moves.eval_cp`, `moves.cp_loss`, `moves.move_accuracy` and sets `games.analyzed`
-- Leaderboard rolls up via `/api/analytics/accuracy` (ACPL and blunder rate are **aggregates**, not stored columns)
-- There is **no** `annotation` column (NAG symbols remain a roadmap item)
+`players.ts` routes `local/*` ids to the built-in engine and everything else to the judge + `requestMove`. Built-in bots avoid revisiting earlier positions when ahead (search can't see game history).
 
-### Database Schema
-Defined in [src/db/schema.ts](../src/db/schema.ts):
+A skill mode (`modes.ts`) sets:
 
-- **models**: AI model registry, provider, ELO, stats, active flag
-- **games**: Players, FEN/PGN, status/result, timeout warnings, `whiteMode`/`blackMode`, processing claim, `analyzed`, optional API keys
-- **moves**: SAN, fenAfter, reasoning, color; nullable `evalCp` / `cpLoss` / `moveAccuracy`
-- **tournament**: Singleton (id=1) run state, tick counters, global API keys
+- **effort** → provider reasoning controls (`ai/providers.ts`), output-token budget and timeout
+- **temperature**
+- **brief**: none / basic (material, check) / threats (loose pieces for both sides)
+- **hints**: an advisory engine shortlist (strategist and above), optionally with scores
+- **blunderGuardCp**
 
-`publicGameColumns` omits per-game API keys and the internal processing claim from client payloads.
+The prompt (`ai/prompt.ts`) also includes the full PGN, a labelled board, the legal move list, the side's own plan from its previous move, and judge feedback. Models answer `{"reasoning", "plan", "move"}`; the parser strips `<think>` traces and takes the last valid JSON object.
 
-## Error Handling Architecture
+## Engine (`lib/engine`)
 
-### Error Types
-- `APIKeyError`: Problems with API authentication
-- `RateLimitError`: Exceeded API rate limits
-- `TimeoutError`: Operations taking too long
-- `ParseError`: Issues parsing AI responses
-- `InvalidMoveError`: Illegal chess moves
+A compact 0x88 board with legal move generation, make/unmake and SAN (verified by perft against the standard suite and by matching chess.js's legal-move set across hundreds of random positions), plus a negamax alpha-beta search with quiescence, MVV-LVA ordering, piece-square-table evaluation, mate scoring and iterative deepening under a time cap. `analyze()` scores every root move exactly. It powers the blunder guard, hints, the threat brief, adjudication and the built-in bots — about 1000× faster than searching with chess.js.
 
-### Error Propagation
-1. Errors are thrown with typed error classes
-2. Higher-level functions catch specific error types
-3. Transient errors (timeouts, parsing) lead to retry / timeout-warning mechanisms
-4. Fatal errors (API keys, rate limits) terminate the game
+## Front end
 
-### Game Continuation Logic
-- **Timeouts**: Up to 2 warnings before forfeit
-- **Invalid Moves / blunders**: Returned to AI with correction context (judge)
-- **API Failures**: Game cancellation with appropriate result
+`GameView` is the one game screen (home page when a game is live, and `/game/[id]`). `useGameData` polls (fast while live, slow when hidden or finished, not at all once analyzed); `useAutoTick` drives ticks without overlapping requests; `useGamePlayback` reveals moves one by one. `useGameAnalysis` runs Stockfish over a finished game in a Web Worker and posts evaluations to `/api/games/[id]/analysis`, which computes centipawn loss and accuracy server-side.
 
-## Configuration Management
+## API
 
-Centralized in [src/lib/config.ts](../src/lib/config.ts):
+| Route | Purpose |
+| --- | --- |
+| `POST /api/games/start` | `{ modelIds: [white, black], whiteMode?, blackMode?, keys? }`. Validates keys, creates the game (one active game at a time; advisory lock + unique index), plays the first move synchronously. 409 if a game is running. |
+| `GET\|POST /api/cron/tick` | Advance all active games. Ungated by design (browser-driven; claims make it safe). |
+| `GET /api/games?status=&limit=` | Games with both models and move counts. |
+| `GET /api/games/[id]` | Game (no keys), moves in ply order, both models. |
+| `POST /api/games/destroy` | Stop the active game: deleted if it has no moves, otherwise ended unrated. |
+| `POST /api/games/[id]/analysis` | Store Stockfish evals (once per game). |
+| `GET /api/leaderboard`, `GET /api/analytics/accuracy` | Ratings and accuracy aggregates. |
+| `GET /api/providers` | Which providers have a server fallback key (booleans only). |
+| `POST /api/tournament/reset` | Wipe games and ratings. Needs `ADMIN_TOKEN` (or development). |
 
-- **AI Timeouts**: Groq 7s, Gemini 30s, Anthropic 20s, OpenAI 20s, Gateway 8s
-- **Game Rules**: Max judge attempts (3), timeout warnings (2), 25-minute TTL, `TICK_BUDGET_MS` 25s
-- **ELO Settings**: K=32, default 1500
-- **Polling Intervals**: Game 1s, games list 15s, completed 60s, auto-tick 5s, tab hidden 30s
+## Data
 
-## Auth
+- `models`: roster and ratings (`local/*` are built-in engines).
+- `games`: FEN, PGN, status, result/reason, per-side modes and warnings, `status_note`, the processing claim, `analyzed`, and per-match encrypted keys (never returned to clients).
+- `moves`: SAN, FEN after, color, reasoning, `plan`, `judge` (jsonb), `think_ms`, and post-analysis `eval_cp` / `cp_loss` / `move_accuracy`.
+- `tournament`: singleton tick counter / run state.
 
-- [src/lib/auth.ts](../src/lib/auth.ts): `requireAdmin` / `requireCron`
-- Admin bearer token gates tournament reset and global Groq/Gemini key updates
-- `requireCron` exists but is **unused**; tick is intentionally ungated for browser-driven play
-- `games/start` and `games/destroy` are ungated; destroy **archives** the active game as complete (does not hard-delete)
-
-## Deployment Architecture
-
-### Environment Variables
-- `DATABASE_URL`
-- Provider keys: `GROQ_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
-- Optional: `AI_GATEWAY_API_KEY`, `ADMIN_TOKEN`, `ENCRYPTION_KEY`
-
-### Scaling Considerations
-- Serverless-safe processing claim (not an in-memory Map)
-- Multi-ply tick budget under Vercel `maxDuration` (60s on the tick route)
-- Visibility-aware polling to limit edge request volume
-
-## Security Considerations
-
-- API keys in env and optionally encrypted at rest in DB
-- Admin-gated destructive / global-key routes when `ADMIN_TOKEN` is set
-- Input validation (Zod) on start and related routes
-- SQL injection protection via ORM
-- Tick left open by design (advances already-active games only; serialized by DB claim)
+Migrations in `drizzle/` are idempotent and tracked in `_arena_migrations`; `pnpm db:migrate` works on fresh databases, on databases created with `drizzle-kit push`, and on ones migrated by hand.

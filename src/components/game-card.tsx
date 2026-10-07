@@ -1,74 +1,47 @@
-"use client";
-
 import Link from "next/link";
-import { Chessboard } from "react-chessboard";
-import { EvalBar } from "./eval-bar";
-import type { Game, Model } from "@/db/schema";
+import type { GameListItem } from "@/types/api";
+import { resultHeadline } from "@/lib/view-model";
+import { cn } from "@/lib/utils";
+import { Board } from "./board";
+import { ModeChip, RatedChip, SideDot } from "./badges";
 
-interface GameCardProps {
-  game: Game & {
-    whiteName?: string;
-    blackName?: string;
-    whiteModel?: Model;
-    blackModel?: Model;
-  };
-}
-
-export function GameCard({ game }: GameCardProps) {
-  const isWhiteTurn = game.fen.split(" ")[1] === "w";
-  const isActive = game.status === "active";
+/** Summary card for one game in the history list. */
+export function GameCard({ game }: { game: GameListItem }) {
+  const white = game.whiteModel?.name ?? game.whiteId;
+  const black = game.blackModel?.name ?? game.blackId;
+  const ended = game.endedAt ? new Date(game.endedAt) : null;
+  const tone =
+    game.result === "1-0" || game.result === "0-1" ? "text-slate-900" : game.result === "1/2-1/2" ? "text-slate-600" : "text-slate-400";
 
   return (
     <Link
       href={`/game/${game.id}`}
-      className="border border-gray-200 bg-white p-3 hover:shadow-md transition-all block w-full max-w-[780px] mx-auto rounded-lg"
+      className="group flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
       data-testid="game-card"
     >
-      {/* Black player - top */}
-      <div
-        className={`text-xs flex justify-between px-1 mb-1 ${isActive && !isWhiteTurn ? "bg-yellow-100" : ""}`}
-      >
-        <div className="flex flex-col">
-          <span className="font-medium">{game.blackName || game.blackId}</span>
-          {game.blackModel && (
-            <span className="text-[11px] text-gray-600" data-testid="black-stats">
-              ELO {game.blackModel.elo} · W{game.blackModel.wins}/L{game.blackModel.losses}/D{game.blackModel.draws}
-            </span>
-          )}
-        </div>
-        <span className="text-gray-500">black</span>
+      <div className="pointer-events-none aspect-square w-full bg-slate-100 p-2">
+        <Board id={`card-${game.id}`} fen={game.fen} animate={false} />
       </div>
-
-      {/* Board with eval bar */}
-      <div className="flex gap-1 items-stretch">
-        <div className="w-4 flex-shrink-0" style={{ aspectRatio: "1/8" }}>
-          <EvalBar fen={game.fen} />
+      <div className="space-y-2 p-3">
+        <p className={cn("text-sm font-bold", tone)}>
+          {resultHeadline(game.result, white, black)} <span className="font-mono text-xs font-semibold text-slate-400">{game.result ?? ""}</span>
+        </p>
+        <div className="space-y-1 text-xs">
+          {([["white", white, game.whiteMode], ["black", black, game.blackMode]] as const).map(([color, name, mode]) => (
+            <div key={color} className="flex items-center gap-1.5">
+              <SideDot color={color} />
+              <span className="truncate font-medium text-slate-800">{name}</span>
+              <ModeChip mode={mode} className="ml-auto" />
+            </div>
+          ))}
         </div>
-        <div className="aspect-square flex-1 max-w-[90vw] md:max-w-[780px]">
-          <Chessboard
-            options={{
-              position: game.fen,
-              allowDragging: false,
-              boardStyle: { borderRadius: "0" },
-              animationDurationInMs: 300,
-            }}
-          />
+        {game.resultReason && <p className="line-clamp-2 text-xs text-slate-500">{game.resultReason}</p>}
+        <div className="flex items-center gap-2 text-[11px] text-slate-400">
+          <RatedChip rated={game.rated} />
+          <span>{game.moveCount} plies</span>
+          {game.analyzed && <span className="text-violet-600">analyzed</span>}
+          {ended && <time className="ml-auto" dateTime={ended.toISOString()}>{ended.toLocaleDateString()}</time>}
         </div>
-      </div>
-
-      {/* White player - bottom */}
-      <div
-        className={`text-xs flex justify-between px-1 mt-1 ${isActive && isWhiteTurn ? "bg-yellow-100" : ""}`}
-      >
-        <div className="flex flex-col">
-          <span className="font-medium">{game.whiteName || game.whiteId}</span>
-          {game.whiteModel && (
-            <span className="text-[11px] text-gray-600" data-testid="white-stats">
-              ELO {game.whiteModel.elo} · W{game.whiteModel.wins}/L{game.whiteModel.losses}/D{game.whiteModel.draws}
-            </span>
-          )}
-        </div>
-        <span className="text-gray-500">white</span>
       </div>
     </Link>
   );

@@ -1,107 +1,50 @@
 import { describe, it, expect } from "vitest";
-import { 
-  StartGameRequestSchema, 
-  SetAPIKeyRequestSchema, 
-  ToggleModelRequestSchema 
-} from "./api";
+import { StartGameRequestSchema, GameIdSchema, GameStatusSchema } from "./api";
 
-describe("API validation schemas", () => {
-  describe("StartGameRequestSchema", () => {
-    it("validates valid request", () => {
-      const validData = { modelIds: ["model1", "model2"] };
-      const result = StartGameRequestSchema.safeParse(validData);
-      expect(result.success).toBe(true);
+describe("StartGameRequestSchema", () => {
+  it("accepts two models with optional modes and keys", () => {
+    const parsed = StartGameRequestSchema.parse({
+      modelIds: ["a", "b"],
+      whiteMode: "novice",
+      blackMode: "grandmaster",
+      keys: { groq: "  gsk_x  ", anthropic: "sk-ant" },
     });
-
-    it("rejects request with less than 2 models", () => {
-      const invalidData = { modelIds: ["model1"] };
-      const result = StartGameRequestSchema.safeParse(invalidData);
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.error.issues[0].message).toContain("At least two models");
-      }
-    });
-
-    it("rejects request with empty modelIds", () => {
-      const invalidData = { modelIds: [] };
-      const result = StartGameRequestSchema.safeParse(invalidData);
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.error.issues[0].message).toContain("At least two models");
-      }
-    });
-
-    it("rejects request without modelIds", () => {
-      const invalidData = { };
-      const result = StartGameRequestSchema.safeParse(invalidData);
-      expect(result.success).toBe(false);
-    });
-
-    it("rejects request with non-array modelIds", () => {
-      const invalidData = { modelIds: "not-an-array" };
-      const result = StartGameRequestSchema.safeParse(invalidData);
-      expect(result.success).toBe(false);
-    });
+    expect(parsed.keys?.groq).toBe("gsk_x");
+    expect(parsed.whiteMode).toBe("novice");
   });
 
-  describe("SetAPIKeyRequestSchema", () => {
-    it("validates valid API key", () => {
-      const validData = { key: "valid-key" };
-      const result = SetAPIKeyRequestSchema.safeParse(validData);
-      expect(result.success).toBe(true);
-    });
-
-    it("rejects request with empty key", () => {
-      const invalidData = { key: "" };
-      const result = SetAPIKeyRequestSchema.safeParse(invalidData);
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.error.issues[0].message).toContain("cannot be empty");
-      }
-    });
-
-    it("rejects request without key", () => {
-      const invalidData = { };
-      const result = SetAPIKeyRequestSchema.safeParse(invalidData);
-      expect(result.success).toBe(false);
-    });
-
-    it("rejects request with non-string key", () => {
-      const invalidData = { key: 12345 };
-      const result = SetAPIKeyRequestSchema.safeParse(invalidData);
-      expect(result.success).toBe(false);
-    });
+  it("accepts legacy key fields", () => {
+    const parsed = StartGameRequestSchema.parse({ modelIds: ["a", "b"], groqApiKey: "g", geminiApiKey: "m" });
+    expect(parsed.groqApiKey).toBe("g");
+    expect(parsed.geminiApiKey).toBe("m");
   });
 
-  describe("ToggleModelRequestSchema", () => {
-    it("validates valid request", () => {
-      const validData = { id: "model-id", active: true };
-      const result = ToggleModelRequestSchema.safeParse(validData);
-      expect(result.success).toBe(true);
-    });
+  it.each([
+    [{ modelIds: ["a"] }, "one model"],
+    [{ modelIds: [] }, "no models"],
+    [{ modelIds: ["a", "b", "c"] }, "three models"],
+    [{ modelIds: ["a", "a"] }, "self-play"],
+    [{ modelIds: ["a", ""] }, "empty id"],
+    [{ modelIds: ["a", "b"], whiteMode: "wizard" }, "unknown mode"],
+    [{ modelIds: ["a", "b"], keys: { groq: "x".repeat(600) } }, "oversized key"],
+    [{}, "missing modelIds"],
+    [null, "null body"],
+  ] as Array<[unknown, string]>)("rejects %j (%s)", (body) => {
+    expect(StartGameRequestSchema.safeParse(body).success).toBe(false);
+  });
 
-    it("rejects request without id", () => {
-      const invalidData = { active: true };
-      const result = ToggleModelRequestSchema.safeParse(invalidData);
-      expect(result.success).toBe(false);
-    });
+  it("explains self-play", () => {
+    const r = StartGameRequestSchema.safeParse({ modelIds: ["a", "a"] });
+    expect(r.success).toBe(false);
+    if (!r.success) expect(r.error.issues[0].message).toMatch(/cannot play against itself/);
+  });
+});
 
-    it("rejects request with non-string id", () => {
-      const invalidData = { id: 123, active: true };
-      const result = ToggleModelRequestSchema.safeParse(invalidData);
-      expect(result.success).toBe(false);
-    });
-
-    it("rejects request without active field", () => {
-      const invalidData = { id: "model-id" };
-      const result = ToggleModelRequestSchema.safeParse(invalidData);
-      expect(result.success).toBe(false);
-    });
-
-    it("rejects request with non-boolean active field", () => {
-      const invalidData = { id: "model-id", active: "true" };
-      const result = ToggleModelRequestSchema.safeParse(invalidData);
-      expect(result.success).toBe(false);
-    });
+describe("small schemas", () => {
+  it("validates game ids and statuses", () => {
+    expect(GameIdSchema.safeParse("00000000-0000-4000-8000-000000000001").success).toBe(true);
+    expect(GameIdSchema.safeParse("not-a-uuid").success).toBe(false);
+    expect(GameStatusSchema.safeParse("active").success).toBe(true);
+    expect(GameStatusSchema.safeParse("aborted").success).toBe(false);
   });
 });

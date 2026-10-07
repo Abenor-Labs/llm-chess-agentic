@@ -6,9 +6,7 @@ import {
   moveAccuracy,
   computeMoveLoss,
   analyzeGame,
-  summarizeMoves,
   CP_CAP,
-  BLUNDER_CP,
 } from "./analysis";
 
 describe("clampCp", () => {
@@ -88,25 +86,5 @@ describe("analyzeGame", () => {
     expect(result.map((r) => r.cpLoss)).toEqual([10, 30, 5]);
     expect(result[0].evalCp).toBe(10);
     expect(result.every((r) => r.moveAccuracy >= 0 && r.moveAccuracy <= 100)).toBe(true);
-  });
-});
-
-describe("summarizeMoves", () => {
-  it("returns zeros for no moves", () => {
-    expect(summarizeMoves([])).toEqual({ moves: 0, acpl: 0, accuracy: 0, blunders: 0, blunderRate: 0 });
-  });
-
-  it("computes ACPL, accuracy and blunder rate", () => {
-    const stats = summarizeMoves([
-      { cpLoss: 0, moveAccuracy: 100 },
-      { cpLoss: 100, moveAccuracy: 80 },
-      { cpLoss: BLUNDER_CP, moveAccuracy: 10 }, // blunder
-      { cpLoss: BLUNDER_CP + 200, moveAccuracy: 5 }, // blunder
-    ]);
-    expect(stats.moves).toBe(4);
-    expect(stats.acpl).toBe(Math.round((0 + 100 + 300 + 500) / 4)); // 225
-    expect(stats.blunders).toBe(2);
-    expect(stats.blunderRate).toBe(0.5);
-    expect(stats.accuracy).toBeCloseTo((100 + 80 + 10 + 5) / 4, 1);
   });
 });

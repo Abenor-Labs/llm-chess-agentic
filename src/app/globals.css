@@ -1,218 +1,23 @@
 @import "tailwindcss";
 
 :root {
-  --background: 0 0% 100%;
-  --foreground: 0 0% 0%;
-  --border: 0 0% 0%;
+  color-scheme: light;
 }
 
 body {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  background: #f8fafc;
+  color: #0f172a;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-* {
-  border-color: hsl(var(--border));
-}
-
-/* Game Start Animation */
-@keyframes game-start-slide-in {
-  0% {
-    opacity: 0;
-    transform: translateY(-20px) scale(0.95);
+/* Respect users who prefer less motion: no bouncing dots or pings. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes game-start-glow {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
-  }
-  50% {
-    box-shadow: 0 0 20px 4px rgba(34, 197, 94, 0.4);
-  }
-}
-
-.animate-game-start {
-  animation: game-start-slide-in 0.5s ease-out, game-start-glow 2s ease-in-out;
-}
-
-/* Game End Animations */
-@keyframes victory-bounce {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  25% {
-    transform: translateY(-8px);
-  }
-  50% {
-    transform: translateY(0);
-  }
-  75% {
-    transform: translateY(-4px);
-  }
-}
-
-@keyframes victory-glow-white {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
-    background-color: rgba(34, 197, 94, 0.1);
-  }
-  50% {
-    box-shadow: 0 0 30px 8px rgba(34, 197, 94, 0.3);
-    background-color: rgba(34, 197, 94, 0.2);
-  }
-}
-
-@keyframes victory-glow-black {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
-    background-color: rgba(239, 68, 68, 0.1);
-  }
-  50% {
-    box-shadow: 0 0 30px 8px rgba(239, 68, 68, 0.3);
-    background-color: rgba(239, 68, 68, 0.2);
-  }
-}
-
-@keyframes draw-fade {
-  0%, 100% {
-    opacity: 0.7;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-.animate-victory-white {
-  animation: victory-bounce 0.6s ease-out, victory-glow-white 2s ease-in-out infinite;
-}
-
-.animate-victory-black {
-  animation: victory-bounce 0.6s ease-out, victory-glow-black 2s ease-in-out infinite;
-}
-
-.animate-draw {
-  animation: draw-fade 2s ease-in-out infinite;
-}
-
-/* ELO Change Animations */
-@keyframes elo-increase {
-  0% {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  20% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes elo-decrease {
-  0% {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  20% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes elo-flash-green {
-  0%, 100% {
-    background-color: transparent;
-  }
-  50% {
-    background-color: rgba(34, 197, 94, 0.2);
-  }
-}
-
-@keyframes elo-flash-red {
-  0%, 100% {
-    background-color: transparent;
-  }
-  50% {
-    background-color: rgba(239, 68, 68, 0.2);
-  }
-}
-
-.animate-elo-up {
-  animation: elo-increase 0.5s ease-out, elo-flash-green 1s ease-in-out;
-}
-
-.animate-elo-down {
-  animation: elo-decrease 0.5s ease-out, elo-flash-red 1s ease-in-out;
-}
-
-/* Leaderboard Row Reorder Animation */
-@keyframes row-reorder {
-  0% {
-    opacity: 0.5;
-    transform: scale(0.98);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.animate-row-reorder {
-  animation: row-reorder 0.3s ease-out;
-}
-
-/* Confetti-like celebration dots */
-@keyframes confetti-fall {
-  0% {
-    opacity: 1;
-    transform: translateY(0) rotate(0deg);
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(100px) rotate(720deg);
-  }
-}
-
-.animate-confetti {
-  animation: confetti-fall 1.5s ease-out forwards;
-}
-
-/* Chess piece movement animations */
-/* Target react-chessboard pieces - use more specific selectors */
-div[data-testid*="chessboard"] img,
-div[data-testid*="chessboard"] svg,
-div[class*="react-chessboard"] img,
-div[class*="react-chessboard"] svg {
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-  will-change: transform;
-}
-
-/* Smooth piece movement for all chess pieces */
-div[class*="square"] img,
-div[class*="square"] svg,
-div[data-square] img,
-div[data-square] svg {
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-  will-change: transform;
-}
-
-/* Ensure the board container doesn't interfere */
-div[class*="react-chessboard"] {
-  transition: none;
-}
-
-/* Enhanced animations when board is updating */
-.chessboard-animating div[class*="square"] img,
-.chessboard-animating div[class*="square"] svg {
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }

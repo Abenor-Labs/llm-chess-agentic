@@ -2,59 +2,63 @@ import { z } from "zod";
 import type { Game, Model, Move } from "@/db/schema";
 import { SkillModeSchema } from "@/lib/modes";
 
-// Shared enum schema for the `?status=` query param, matching the DB enum.
 export const GameStatusSchema = z.enum(["active", "complete"]);
 export type GameStatus = z.infer<typeof GameStatusSchema>;
 
-// Request schemas
+export const GameIdSchema = z.string().uuid();
+
+const Key = z.string().trim().max(512).optional();
+
 export const StartGameRequestSchema = z
   .object({
-    modelIds: z.array(z.string()).min(2, "At least two models required"),
-    groqApiKey: z.string().optional(), // Optional API key for Groq models
-    geminiApiKey: z.string().optional(), // Optional API key for Gemini models
-    whiteMode: SkillModeSchema.optional(), // Skill mode for white player
-    blackMode: SkillModeSchema.optional(), // Skill mode for black player
+    /** [white, black] */
+    modelIds: z.tuple([z.string().min(1).max(200), z.string().min(1).max(200)]),
+    whiteMode: SkillModeSchema.optional(),
+    blackMode: SkillModeSchema.optional(),
+    keys: z
+      .object({ groq: Key, google: Key, anthropic: Key, openai: Key })
+      .partial()
+      .optional(),
+    /** Legacy field names, still accepted. */
+    groqApiKey: Key,
+    geminiApiKey: Key,
   })
   .refine((data) => data.modelIds[0] !== data.modelIds[1], {
     message: "A model cannot play against itself; pick two different models",
     path: ["modelIds"],
   });
+export type StartGameRequest = z.infer<typeof StartGameRequestSchema>;
 
-export const SetAPIKeyRequestSchema = z.object({
-  key: z.string().min(1, "API key cannot be empty"),
-});
-
-export const ToggleModelRequestSchema = z.object({
-  id: z.string(),
-  active: z.boolean(),
-});
-
-// Response types
-export interface APIResponse<T = unknown> {
-  success?: boolean;
-  error?: string;
-  data?: T;
-}
+/** Game columns safe for clients, plus derived fields. */
+export type PublicGame = Omit<
+  Game,
+  "groqApiKey" | "geminiApiKey" | "anthropicApiKey" | "openaiApiKey" | "processing" | "processingStartedAt"
+> & { rated: boolean };
 
 export interface GameDetailResponse {
-  game: Game;
+  game: PublicGame;
   moves: Move[];
   white: Model;
   black: Model;
 }
 
+export type GameListItem = PublicGame & { whiteModel?: Model; blackModel?: Model; moveCount: number };
+
 export interface GamesListResponse {
-  games: Game[];
+  games: GameListItem[];
 }
 
 export interface LeaderboardResponse {
   models: Model[];
 }
 
-export interface TournamentStatusResponse {
-  status: "running" | "stopped";
-  tickCount: number;
-  tickIntervalSec: number;
-  lastTickAt: string | null;
-  nextTickAt: string | null;
+export interface AccuracyStat {
+  modelId: string;
+  name: string;
+  provider: string;
+  moveCount: number;
+  acpl: number;
+  accuracy: number;
+  blunders: number;
+  blunderRate: number;
 }

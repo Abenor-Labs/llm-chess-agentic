@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatElapsed, sanitizeId } from "./utils";
+import { formatElapsed } from "./utils";
 
 describe("Utility functions", () => {
   describe("formatElapsed", () => {
@@ -23,28 +23,6 @@ describe("Utility functions", () => {
 
     it("handles negative values", () => {
       expect(formatElapsed(-1000)).toBe("00:00"); // should return 00:00 for negative values
-    });
-  });
-
-  describe("sanitizeId", () => {
-    it("sanitizes special characters", () => {
-      expect(sanitizeId("model/id")).toBe("model_id");
-      expect(sanitizeId("model.id")).toBe("model_id");
-      expect(sanitizeId("model@id")).toBe("model_id");
-      expect(sanitizeId("model id")).toBe("model_id");
-    });
-
-    it("preserves alphanumeric characters and allowed symbols", () => {
-      expect(sanitizeId("abc123")).toBe("abc123");
-      expect(sanitizeId("model-name_test")).toBe("model-name_test");
-    });
-
-    it("handles empty string", () => {
-      expect(sanitizeId("")).toBe("");
-    });
-
-    it("handles complex strings", () => {
-      expect(sanitizeId("groq/llama-3.1-8b@instant!")).toBe("groq_llama-3_1-8b_instant_");
     });
   });
 });

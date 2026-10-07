@@ -1,36 +1,14 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { games, moves, models, publicGameColumns } from "@/db/schema";
-import { eq, asc } from "drizzle-orm";
+import { GameIdSchema } from "@/types/api";
+import { getGameDetail } from "@/lib/game-queries";
 
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-
-  const [game] = await db
-    .select(publicGameColumns)
-    .from(games)
-    .where(eq(games.id, id));
-
-  if (!game) {
+  // A non-UUID would make Postgres throw; it simply isn't a game.
+  if (!GameIdSchema.safeParse(id).success) {
     return NextResponse.json({ error: "Game not found" }, { status: 404 });
   }
-
-  const gameMoves = await db
-    .select()
-    .from(moves)
-    .where(eq(moves.gameId, id))
-    .orderBy(asc(moves.moveNumber));
-
-  const [white] = await db.select().from(models).where(eq(models.id, game.whiteId));
-  const [black] = await db.select().from(models).where(eq(models.id, game.blackId));
-
-  return NextResponse.json({
-    game,
-    moves: gameMoves,
-    white,
-    black,
-  });
+  const detail = await getGameDetail(id);
+  if (!detail) return NextResponse.json({ error: "Game not found" }, { status: 404 });
+  return NextResponse.json(detail);
 }

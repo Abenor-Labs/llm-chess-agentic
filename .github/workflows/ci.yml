@@ -6,41 +6,63 @@ on:
   pull_request:
 
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: chess
+          POSTGRES_PASSWORD: chess
+          POSTGRES_DB: chess
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chess -d chess"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Unit + integration tests run against this database; the e2e server too.
+      TEST_DATABASE_URL: postgresql://chess:chess@localhost:5432/chess
+      DATABASE_URL: postgresql://chess:chess@localhost:5432/chess
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
         with:
           version: 10
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
 
-      # Non-blocking for now: the tree carries pre-existing lint debt (mostly
-      # no-explicit-any in tests/scripts). Surfaced in CI but not gating, so PRs
-      # aren't blocked by unrelated debt. Flip to blocking once the backlog is cleared.
       - name: Lint
         run: pnpm lint
-        continue-on-error: true
 
       - name: Typecheck
-        run: pnpm exec tsc --noEmit
+        run: pnpm typecheck
 
-      - name: Unit tests
+      - name: Unit + database tests
         run: pnpm test
 
-      - name: Build
-        run: pnpm build
+      - name: Migrate and seed (for e2e)
+        run: pnpm db:setup
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: End-to-end tests (builds and starts production)
+        run: pnpm test:e2e
         env:
-          # Build must not require secrets — the app connects to the DB lazily at
-          # request time, so a placeholder keeps `next build` self-contained.
-          DATABASE_URL: postgresql://user:pass@localhost:5432/placeholder
+          CI: "true"
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

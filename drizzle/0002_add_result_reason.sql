@@ -1,2 +1,1 @@
--- Add result_reason column to games table
-ALTER TABLE "games" ADD COLUMN "result_reason" text;
+ALTER TABLE "games" ADD COLUMN IF NOT EXISTS "result_reason" text;
