@@ -1,45 +1,52 @@
-import dotenv from "dotenv";
-import { Chess } from "chess.js";
-import { db } from "../src/db";
-import { models } from "../src/db/schema";
-import { eq } from "drizzle-orm";
-import { requestMove } from "../src/lib/ai";
+/**
+ * Asks every active model with an available key for one opening move and
+ * reports latency and the judge's view of the answer. Read-only.
+ *
+ *   pnpm healthcheck [--mode grandmaster]
+ */
+import { config } from "dotenv";
 
-// Load env (prefer .env.local if present)
-dotenv.config({ path: ".env.local" });
-dotenv.config();
+config({ path: ".env.local", quiet: true });
 
 async function main() {
-  const activeModels = await db.select().from(models).where(eq(models.active, true));
-  const chess = new Chess();
-  const fen = chess.fen();
-  const legalMoves = chess.moves();
-  const lastMoves: string[] = [];
+  const [{ db }, { models }, { eq }, ai, { resolveMove, STARTING_FEN, getLegalMoves }] = await Promise.all([
+    import("../src/db"),
+    import("../src/db/schema"),
+    import("drizzle-orm"),
+    import("../src/lib/ai"),
+    import("../src/lib/chess"),
+  ]);
+  const modeIdx = process.argv.indexOf("--mode");
+  const mode = modeIdx >= 0 ? process.argv[modeIdx + 1] : "scholar";
+  const roster = await db.select().from(models).where(eq(models.active, true));
+  const rows: Array<Record<string, string | number>> = [];
 
-  const results: Array<{ id: string; provider: string; name: string; success: boolean; move?: string; error?: string }>
-    = [];
-
-  for (const model of activeModels) {
-    const modelId = model.id;
+  for (const m of roster) {
+    const provider = ai.providerOf(m.id);
+    if (provider === "local") continue;
+    if (ai.isKeyedProvider(provider) && !ai.resolveKey(provider)) {
+      rows.push({ model: m.id, status: "skipped (no key)" });
+      continue;
+    }
     try {
-      const move = await requestMove(modelId, { fen, color: "white", legalMoves, lastMoves });
-      results.push({ id: modelId, provider: model.provider, name: model.name, success: true, move: move.move });
-      console.log(`[OK] ${modelId} -> ${move.move}`);
+      const reply = await ai.requestMove(m.id, {
+        fen: STARTING_FEN,
+        color: "white",
+        legalMoves: getLegalMoves(STARTING_FEN),
+        history: [],
+        mode,
+      });
+      const legal = resolveMove(STARTING_FEN, reply.move);
+      rows.push({ model: m.id, status: legal ? "ok" : "illegal", move: legal?.san ?? reply.move, ms: reply.latencyMs });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      results.push({ id: modelId, provider: model.provider, name: model.name, success: false, error: msg });
-      console.error(`[FAIL] ${modelId}: ${msg}`);
-      await db.delete(models).where(eq(models.id, model.id));
+      rows.push({ model: m.id, status: `error: ${err instanceof Error ? err.message : String(err)}`.slice(0, 120) });
     }
   }
-
-  const ok = results.filter((r) => r.success).length;
-  const fail = results.length - ok;
-  console.log(`\nSummary: ${ok} passed, ${fail} failed (removed).`);
-  console.table(results);
+  console.table(rows);
+  process.exit(0);
 }
 
-main().then(() => process.exit(0)).catch((err) => {
+main().catch((err) => {
   console.error(err);
   process.exit(1);
 });

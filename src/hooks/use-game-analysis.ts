@@ -87,8 +87,8 @@ function evaluateFen(worker: Worker, fen: string, depth: number): Promise<number
  * Returns live progress while analyzing, or null when idle/done.
  */
 export function useGameAnalysis(
-  game: Game | undefined,
-  moves: Move[] | undefined,
+  game: Pick<Game, "id" | "status" | "analyzed"> | undefined,
+  moves: Pick<Move, "id" | "fenAfter">[] | undefined,
   onComplete?: () => void
 ): AnalysisProgress | null {
   const [progress, setProgress] = useState<AnalysisProgress | null>(null);

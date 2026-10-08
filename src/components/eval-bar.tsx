@@ -1,105 +1,46 @@
 "use client";
 
-import { useStockfish } from "@/hooks/use-stockfish";
+import { useStockfish, type Evaluation } from "@/hooks/use-stockfish";
+import { cn } from "@/lib/utils";
 
-interface EvalBarProps {
-  fen: string;
+/** White's share of the bar, 0..100. Logistic so ±4 pawns already reads as "winning". */
+export function whiteShare(e: Evaluation | null): number {
+  if (!e) return 50;
+  if (e.mate !== null) return e.mate > 0 ? 100 : e.mate < 0 ? 0 : 50;
+  const cp = e.cp ?? 0;
+  return 100 / (1 + Math.exp(-0.004 * cp));
 }
 
-export function EvalBar({ fen }: EvalBarProps) {
-  const { evaluation, depth, isReady } = useStockfish(fen, 16);
+export function evalLabel(e: Evaluation | null): string {
+  if (!e) return "…";
+  if (e.mate !== null) return e.mate === 0 ? "#" : `M${Math.abs(e.mate)}`;
+  const pawns = (e.cp ?? 0) / 100;
+  return `${pawns > 0 ? "+" : ""}${pawns.toFixed(1)}`;
+}
 
-  // Convert centipawns to percentage (sigmoid-like scaling)
-  // ±400cp maps roughly to ±90% of the bar
-  const evalToPercent = (cp: number): number => {
-    // Clamp extreme values
-    const clamped = Math.max(-1000, Math.min(1000, cp));
-    // Sigmoid-ish transformation
-    const percent = 50 + (50 * clamped) / (Math.abs(clamped) + 400);
-    return percent;
-  };
-
-  const whitePercent = evaluation !== null ? evalToPercent(evaluation) : 50;
-  const evalText =
-    evaluation !== null
-      ? evaluation >= 0
-        ? `+${(evaluation / 100).toFixed(1)}`
-        : (evaluation / 100).toFixed(1)
-      : "...";
-
+export function EvalBar({ fen, orientation = "white", className }: { fen: string; orientation?: "white" | "black"; className?: string }) {
+  const { evaluation } = useStockfish(fen);
+  const share = whiteShare(evaluation);
+  const whiteAhead = share >= 50;
   return (
     <div
-      style={{
-        width: "24px",
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        border: "2px solid black",
-        position: "relative",
-        backgroundColor: "#1a1a1a",
-      }}
+      className={cn("relative w-5 overflow-hidden rounded bg-slate-800 ring-1 ring-slate-900/20", className)}
+      title={evaluation ? `Stockfish: ${evalLabel(evaluation)} (depth ${evaluation.depth})` : "Stockfish is warming up"}
+      data-testid="eval-bar"
     >
-      {/* White portion (bottom) */}
       <div
-        style={{
-          position: "absolute",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          height: `${whitePercent}%`,
-          backgroundColor: "#f0f0f0",
-          transition: "height 0.3s ease-out",
-        }}
+        className={cn("absolute inset-x-0 bg-slate-50 transition-[height] duration-500 ease-out", orientation === "white" ? "bottom-0" : "top-0")}
+        style={{ height: `${share}%` }}
       />
-
-      {/* Eval text */}
-      <div
-        style={{
-          position: "absolute",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%) rotate(-90deg)",
-          fontSize: "10px",
-          fontWeight: "bold",
-          color: whitePercent > 50 ? "#1a1a1a" : "#f0f0f0",
-          whiteSpace: "nowrap",
-          textShadow:
-            whitePercent > 50
-              ? "0 0 2px #f0f0f0"
-              : "0 0 2px #1a1a1a",
-        }}
+      <span
+        className={cn(
+          "absolute inset-x-0 text-center text-[9px] font-bold tabular-nums",
+          whiteAhead === (orientation === "white") ? "bottom-1" : "top-1",
+          whiteAhead ? "text-slate-800" : "text-slate-100",
+        )}
       >
-        {evalText}
-      </div>
-
-      {/* Depth indicator */}
-      {!isReady ? (
-        <div
-          style={{
-            position: "absolute",
-            bottom: "4px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            fontSize: "8px",
-            color: "#666",
-          }}
-        >
-          ...
-        </div>
-      ) : depth > 0 ? (
-        <div
-          style={{
-            position: "absolute",
-            bottom: "4px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            fontSize: "8px",
-            color: "#666",
-          }}
-        >
-          d{depth}
-        </div>
-      ) : null}
+        {evalLabel(evaluation)}
+      </span>
     </div>
   );
 }

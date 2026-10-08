@@ -1,67 +1,85 @@
+import type { Effort } from "./modes";
+
 /**
- * AI Request Timeouts
- * 
- * Groq: 7s - Fast models, typically respond in 2-3s
- * Gemini: 30s - Slower API with potential cold starts, needs more time for reliable responses
- * Gateway: 8s - Other providers via AI SDK
+ * Per-attempt AI request timeouts. A provider's base timeout is scaled by the
+ * mode's reasoning effort (thinking takes time) and capped, so one attempt can
+ * never outlive the ply deadline below.
  */
 export const AI_TIMEOUTS = {
-  GROQ_MS: 7_000,
-  GEMINI_MS: 30_000, // Increased from 15s to 30s to handle API slowness and cold starts
-  ANTHROPIC_MS: 20_000, // Claude models; allow headroom for extended-thinking variants
-  OPENAI_MS: 20_000, // Direct OpenAI; reasoning models (o-series) can be slow
-  GATEWAY_MS: 8_000,
+  BASE_MS: {
+    groq: 12_000,
+    google: 40_000,
+    anthropic: 40_000,
+    openai: 45_000,
+    gateway: 30_000,
+  },
+  EFFORT_MULTIPLIER: { minimal: 1, low: 1, medium: 1.5, high: 2.5 } satisfies Record<Effort, number>,
+  MAX_MS: 100_000,
 } as const;
 
+/** Output-token budgets per effort. Reasoning tokens count against these. */
+export const OUTPUT_TOKENS: Record<Effort, number> = {
+  minimal: 1_024,
+  low: 2_048,
+  medium: 4_096,
+  high: 8_192,
+};
+
 /**
- * Game Rules
- * 
- * MAX_JUDGE_ATTEMPTS: Number of chances to correct illegal move
- * MAX_TIMEOUT_WARNINGS: Consecutive timeouts before forfeit
- * GAME_TIME_LIMIT_MS: Maximum game duration (25 minutes)
+ * Game rules and the processing timeline. The invariants that keep the
+ * serverless loop safe:
+ *   TICK_BUDGET_MS + PLY_DEADLINE_MS  <  TICK_MAX_DURATION_S * 1000
+ *   PLY_DEADLINE_MS                    <  CLAIM_STALE_MS
+ * so a tick always finishes its in-flight ply before the platform kills it, and
+ * a live processor's claim is never mistaken for an abandoned one.
  */
 export const GAME_RULES = {
+  /** Model attempts per ply (illegal / unparseable answers get feedback and a retry). */
   MAX_JUDGE_ATTEMPTS: 3,
+  /** Consecutive failed plies a side may have; one more forfeits. */
   MAX_TIMEOUT_WARNINGS: 2,
-  GAME_TIME_LIMIT_MS: 25 * 60 * 1000,
-  // One tick invocation keeps playing moves back-to-back until this budget is
-  // spent (plus at most one in-flight ply), so a full game takes a handful of
-  // ticks instead of one ply per browser tick. Keep below the route's
-  // maxDuration (60s on Vercel) with headroom for a slow final ply.
+  /** Wall-clock cap for a game; reaching it triggers engine adjudication. */
+  GAME_TIME_LIMIT_MS: 30 * 60 * 1000,
+  /** A tick starts new plies until this much time has passed. */
   TICK_BUDGET_MS: 25_000,
+  /** Hard cap on one ply including every judge attempt. */
+  PLY_DEADLINE_MS: 150_000,
+  /** A claim older than this is considered abandoned (processor crashed). */
+  CLAIM_STALE_MS: 240_000,
+  /** Must match `maxDuration` exported by the tick route. */
+  TICK_MAX_DURATION_S: 300,
 } as const;
 
-/**
- * ELO Rating System
- * 
- * K_FACTOR: Rating change multiplier (32 is standard for chess)
- */
+/** Engine settings for the judge (blunder guard, hints) and adjudication. */
+export const ENGINE = {
+  JUDGE_DEPTH: 3,
+  JUDGE_MAX_MS: 1_500,
+} as const;
+
 export const ELO_CONFIG = {
   K_FACTOR: 32,
   DEFAULT_RATING: 1500,
 } as const;
 
 /**
- * UI Polling Intervals (optimized for Vercel edge request quota)
+ * UI polling intervals, tuned for serverless request quotas.
  *
- * GAME_REFRESH_MS: Active game poll interval (visible tab)
- * GAMES_LIST_REFRESH_MS: Game history / bulk list poll (visible tab)
- * COMPLETED_GAME_REFRESH_MS: When game is complete, poll much less
- * AUTO_TICK_MS: Auto-tick active games (must be > typical processing time ~5s)
- * WHEN_TAB_HIDDEN_MS: Poll interval when tab is not visible
+ * GAME_REFRESH_MS: active game poll (visible tab)
+ * GAMES_LIST_REFRESH_MS: history list poll (visible tab)
+ * COMPLETED_GAME_REFRESH_MS: finished game poll
+ * AUTO_TICK_MS: auto-tick cadence; ticks landing mid-processing return instantly
+ * WHEN_TAB_HIDDEN_MS: any poll while the tab is hidden
  */
 export const POLLING_INTERVALS = {
-  GAME_REFRESH_MS: 1_000, // Active game: poll every 1s to catch moves quickly and avoid batching
+  GAME_REFRESH_MS: 1_500,
   GAMES_LIST_REFRESH_MS: 15_000,
   COMPLETED_GAME_REFRESH_MS: 60_000,
-  AUTO_TICK_MS: 5_000, // Ticks that land mid-processing return instantly (claim is held), so this is cheap
+  AUTO_TICK_MS: 5_000,
   WHEN_TAB_HIDDEN_MS: 30_000,
 } as const;
 
 /**
- * How long each move is shown before the board advances to the next one.
- * The server plays moves in bursts; the client plays them back one at a time at
- * this cadence so pieces glide instead of teleporting. Only paces catch-up — a
- * live game that is keeping up moves at the AI's own (slower) speed.
+ * How long each move is shown before the board advances to the next one. The
+ * server plays moves in bursts; the client reveals them one at a time.
  */
 export const MOVE_PLAYBACK_MS = 900;

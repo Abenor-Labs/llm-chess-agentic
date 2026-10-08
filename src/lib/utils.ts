@@ -26,12 +26,3 @@ export function formatElapsed(ms: number): string {
   }
   return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 }
-
-/**
- * Sanitize model ID for use in HTML test IDs
- * @param id - Model ID to sanitize
- * @returns Sanitized ID safe for HTML attributes
- */
-export function sanitizeId(id: string): string {
-  return id.replace(/[^a-zA-Z0-9_-]/g, "_");
-}

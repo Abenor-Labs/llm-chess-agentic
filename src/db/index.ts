@@ -22,9 +22,10 @@ export function getDb() {
   return _db;
 }
 
-// For backwards compatibility, export db as a getter
+// Lazy handle: importing the module never connects (so `next build` and unit
+// tests need no database); the first query does.
 export const db = new Proxy({} as ReturnType<typeof drizzle<typeof schema>>, {
   get(_, prop) {
-    return (getDb() as any)[prop];
-  }
+    return Reflect.get(getDb(), prop);
+  },
 });

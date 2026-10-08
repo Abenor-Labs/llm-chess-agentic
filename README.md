@@ -1,110 +1,68 @@
-# LLM Chess Tournament
+# LLM Chess Arena
 
-A chess tournament system powered by Large Language Models (LLMs), featuring automated gameplay between different AI models.
+Watch language models play chess against each other — and see *why* they play what they play.
 
-## Features
+Every move shows the model's reasoning and its plan, how long it thought, and what the judge did (illegal answers caught, notation repaired, blunders questioned). Finished games get a Stockfish review in the browser, which feeds accuracy, ACPL and blunder rate into the leaderboard next to ELO.
 
-- Automated chess games between LLMs from **Groq**, **Google Gemini**, **Anthropic**, and **OpenAI** (plus optional AI Gateway for other ids)
-- Per-side **skill modes** (novice → grandmaster) that change temperature, candidate filtering, and blunder guarding
-- ELO rating system to track model performance
-- Post-game **Stockfish analysis**: per-move accuracy / centipawn loss, plus leaderboard ACPL and blunder rate
-- Real-time tournament management and interactive game viewer with move-by-move reasoning
-- Live Stockfish eval bar during play
-- Configurable timeouts, tick budget, and polling intervals
+## Highlights
 
-## Architecture
+- **Bring your own key** for Groq, Google Gemini, Anthropic and OpenAI (other ids route through the Vercel AI Gateway). Keys stay in your browser and are sent only with the matches that need them.
+- **Built-in engines** (Random Mover, Greedy Grabber, Arena Engine depth 2/4) — no key needed, and they anchor the rating pool.
+- **Skill modes** per side, novice → grandmaster. A mode sets the model's *reasoning effort* (Groq `reasoning_effort`, Gemini thinking level/budget, Claude extended thinking, OpenAI `reasoningEffort`), temperature, how much of the position is briefed in the prompt, an advisory engine shortlist, and the blunder-guard threshold.
+- **A judge that respects the model's decision.** Any notation that maps to exactly one legal move is accepted (`e2e4`, `0-0`, `Nxe5+!`). Illegal or unreadable answers get specific feedback and another try. A clear blunder gets *one* "are you sure?" with the concrete refutation — the model's second answer stands. If a retry fails, the model's earlier legal move is played instead of costing it a timeout.
+- **Fair ratings.** Only games where both sides use the same mode are rated. Cancelled or stopped matches never touch ratings.
+- **Smooth live view.** Moves arriving in bursts are revealed one by one (faster when the board is behind). Browse any ply with ← / →, Home / End, or the move list; F flips the board.
 
-The application is built with:
-- **Frontend**: Next.js 16, React 19, Tailwind CSS
-- **Backend**: Next.js App Router API routes
-- **Database**: PostgreSQL with Drizzle ORM
-- **AI Integration**: AI SDK — non-streaming `generateText` for Groq / Google / Anthropic / OpenAI; Gateway `streamText` fallback
-- **Chess**: chess.js for rules; tiny depth-2 engine scorer for skill modes; Stockfish WASM for eval / post-game analysis
+## Quick start
 
-## Setup
+```bash
+pnpm install
+docker compose up -d                       # Postgres on localhost:5434
+echo 'DATABASE_URL=postgresql://chess:chess@localhost:5434/chess' > .env.local
+pnpm db:setup                              # migrate + seed the model roster
+pnpm dev                                   # http://localhost:3000
+```
 
-1. Clone the repository
-2. Install dependencies: `pnpm install`
-3. Set up environment variables in `.env.local`:
-   ```
-   DATABASE_URL=your_postgres_connection_string
-   GROQ_API_KEY=your_groq_key
-   GEMINI_API_KEY=your_gemini_key
-   ANTHROPIC_API_KEY=your_anthropic_key   # optional until Claude models are enabled
-   OPENAI_API_KEY=your_openai_key         # optional until GPT models are enabled
-   AI_GATEWAY_API_KEY=your_ai_gateway_key # optional
-   ADMIN_TOKEN=your_admin_token           # required in production for reset / global key routes
-   ENCRYPTION_KEY=...                     # optional; encrypts API keys at rest
-   ```
-4. Run database setup: `pnpm db:setup` (or `pnpm db:push` then `pnpm db:seed`)
-5. Start the development server: `pnpm dev`
+Open the app and click **watch two built-in engines** to see a game without any key, or add a key under **Settings** and pick LLMs.
 
-Seeded models (July 2026): active Groq (gpt-oss, Qwen 3.6) and Gemini 3.x (+ 2.5 legacy); Anthropic and OpenAI entries are inactive until you set keys and toggle them on.
+From a shell: `pnpm simulate` plays a whole match through the real processor and prints each move (`pnpm simulate local/engine-4 groq/openai/gpt-oss-120b --black-mode grandmaster`).
 
-## Error Handling
+## How a move is made
 
-The application implements comprehensive error handling with typed error classes:
+```
+browser auto-tick ─► /api/cron/tick ─► processGame (atomic DB claim, plays plies for ≤25s)
+                                          │
+                                          ▼
+                                   playTurn ── local/* ─► built-in engine
+                                          │
+                                          └─ LLM ─► judge ─► requestMove ─► provider (effort-scaled)
+                                                     ▲             │
+                                                     └─ feedback ◄─┘  (illegal / unreadable / blunder)
+                                          ▼
+                     transaction: guarded position update + move row (reasoning, plan, judge, think time)
+```
 
-- `APIKeyError`: Thrown when API keys are invalid or missing
-- `RateLimitError`: Thrown when rate limits are exceeded
-- `TimeoutError`: Thrown when operations time out
-- `ParseError`: Thrown when AI responses cannot be parsed
-- `InvalidMoveError`: Thrown when invalid chess moves are attempted
+Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-These errors are caught and handled appropriately throughout the application, with game continuation logic for transient issues and game termination for fatal errors.
+## Scripts
 
-## Development Scripts
-
-- Database: `pnpm db:push`, `pnpm db:seed`, `pnpm db:setup`
-- Tests: `pnpm test`, `pnpm test:watch`, `pnpm test:e2e`, `pnpm typecheck`
-- Ad-hoc utilities live under `scripts/` (run with `pnpm exec tsx scripts/<name>.ts` as needed)
+| Command | What it does |
+| --- | --- |
+| `pnpm dev` / `pnpm build` / `pnpm start` | Next.js |
+| `pnpm db:migrate` | Apply `drizzle/*.sql` (idempotent, tracked in `_arena_migrations`) |
+| `pnpm db:seed` | Upsert the model roster (never deletes games or ratings) |
+| `pnpm db:setup` | Both of the above |
+| `pnpm test` | Unit tests + database integration tests (the latter need `TEST_DATABASE_URL`) |
+| `pnpm test:unit` / `pnpm test:db` | One project only |
+| `pnpm test:e2e` | Playwright against a real server and database |
+| `pnpm lint` / `pnpm typecheck` | Static checks |
+| `pnpm simulate` | Play a full match from the command line |
+| `pnpm healthcheck` | Ask every keyed model for one move and report latency / legality |
+| `tsx scripts/list-available-models.ts` | List the model ids each provider currently serves |
 
 ## Configuration
 
-Centralized in `src/lib/config.ts`:
-
-- `AI_TIMEOUTS`: Groq 7s, Gemini 30s, Anthropic 20s, OpenAI 20s, Gateway 8s
-- `GAME_RULES`: max judge attempts (3), timeout warnings (2), game time limit (25 min), `TICK_BUDGET_MS` (25s multi-ply budget per tick)
-- `ELO_CONFIG`: K factor 32, default rating 1500
-- `POLLING_INTERVALS`: game refresh 1s, games list 15s, completed game 60s, auto-tick 5s, tab hidden 30s
-
-## API Routes
-
-Key endpoints:
-
-- `POST /api/games/start` — start a game (`modelIds`, optional `whiteMode`/`blackMode`, optional per-game keys). Ungated.
-- `POST /api/games/destroy` — archive the active game as complete (does not hard-delete). Ungated.
-- `POST /api/games/[id]/analysis` — persist Stockfish evals into move columns and set `analyzed`
-- `GET /api/analytics/accuracy` — per-model ACPL / accuracy / blunder rate aggregates
-- `GET|POST /api/cron/tick` — process active games (intentionally ungated; browser-driven)
-- `POST /api/tournament/reset`, `.../groq-key`, `.../gemini-key` — require `Authorization: Bearer $ADMIN_TOKEN` when configured
-- `/api/games/bulk`, `/api/leaderboard`, `/api/tournament/*` — read / control surfaces
-
-## Database Schema
-
-PostgreSQL tables (see `src/db/schema.ts`):
-
-- `models` — id, name, provider, ELO, win/loss/draw stats, active flag
-- `games` — players, FEN/PGN, status/result, timeout warnings, `white_mode`/`black_mode`, processing claim (`processing` / `processing_started_at`), `analyzed`, optional encrypted API keys
-- `moves` — SAN, FEN after, reasoning, color; nullable post-analysis `eval_cp` / `cp_loss` / `move_accuracy` (no annotation column)
-- `tournament` — singleton (id=1): run state, tick counters, global API keys
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Submit a pull request
-
-See `docs/ROADMAP.md` for prioritized fixes and features.
-
-## Running Tests
-
-```bash
-pnpm test
-pnpm test:e2e
-```
+Environment variables are documented in [.env.example](.env.example). Tunables live in [`src/lib/config.ts`](src/lib/config.ts) (timeouts per provider × effort, judge attempts, tick budget, ply deadline, claim staleness, polling) and [`src/lib/modes.ts`](src/lib/modes.ts) (skill modes).
 
 ## License
 

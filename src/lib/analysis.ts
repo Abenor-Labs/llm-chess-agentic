@@ -1,7 +1,7 @@
 /**
  * Post-game analysis math: turns a sequence of Stockfish evaluations into
- * per-move centipawn loss and accuracy, and aggregates them into per-model
- * benchmark stats. Pure and engine-agnostic so it can be fully unit-tested;
+ * per-move centipawn loss and accuracy (per-model aggregates are computed in SQL
+ * by /api/analytics/accuracy). Pure and engine-agnostic so it can be unit-tested;
  * the actual engine runs in the browser (see src/hooks/use-game-analysis.ts).
  */
 
@@ -92,33 +92,4 @@ export function analyzeGame(startEvalWhiteCp: number, plies: PlyEval[]): MoveAna
     });
     return { evalCp: Math.round(ply.evalCp), cpLoss, moveAccuracy: acc };
   });
-}
-
-export interface ModelStats {
-  moves: number;
-  /** Average centipawn loss (lower is stronger). */
-  acpl: number;
-  /** Average per-move accuracy 0-100 (higher is stronger). */
-  accuracy: number;
-  blunders: number;
-  /** Fraction of moves that were blunders, 0-1. */
-  blunderRate: number;
-}
-
-/** Aggregates per-move analysis into per-model benchmark stats. */
-export function summarizeMoves(entries: Array<{ cpLoss: number; moveAccuracy: number }>): ModelStats {
-  const moves = entries.length;
-  if (moves === 0) {
-    return { moves: 0, acpl: 0, accuracy: 0, blunders: 0, blunderRate: 0 };
-  }
-  const totalLoss = entries.reduce((s, e) => s + e.cpLoss, 0);
-  const totalAcc = entries.reduce((s, e) => s + e.moveAccuracy, 0);
-  const blunders = entries.filter((e) => e.cpLoss >= BLUNDER_CP).length;
-  return {
-    moves,
-    acpl: Math.round(totalLoss / moves),
-    accuracy: Math.round((totalAcc / moves) * 10) / 10,
-    blunders,
-    blunderRate: blunders / moves,
-  };
 }

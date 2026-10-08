@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { useChessSounds } from "@/hooks/use-chess-sounds";
+import { useEffect, useRef, useState } from "react";
+import { KEYED_PROVIDERS, type KeyedProvider } from "@/lib/provider-ids";
+import { KEY_HELP, maskKey, readKey, writeKey } from "@/lib/client-keys";
+import { getSoundSettings, playSound, setSoundSettings } from "@/lib/sounds";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -9,261 +11,160 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-  const [groqKey, setGroqKey] = useState("");
-  const [geminiKey, setGeminiKey] = useState("");
-  const [groqMessage, setGroqMessage] = useState<{ text: string; isError: boolean } | null>(null);
-  const [geminiMessage, setGeminiMessage] = useState<{ text: string; isError: boolean } | null>(null);
-  const modalRef = useRef<HTMLDivElement>(null);
+  // Mounted only while open, so its state is read fresh from storage each time.
+  return isOpen ? <SettingsDialog onClose={onClose} /> : null;
+}
 
-  // Keys are yours: kept only in this browser (localStorage) and sent with each
-  // match you start. Never stored on the server as a shared global key.
+function SettingsDialog({ onClose }: { onClose: () => void }) {
+  const dialog = useRef<HTMLDivElement>(null);
+  const [sound, setSound] = useState(getSoundSettings);
+
   useEffect(() => {
-    setGroqKey(localStorage.getItem("groqApiKey") || "");
-    setGeminiKey(localStorage.getItem("geminiApiKey") || "");
-  }, [isOpen]);
-
-  const { getSettings, updateSettings, sounds } = useChessSounds();
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  const [soundVolume, setSoundVolume] = useState(0.5);
-
-  // Load sound settings on mount
-  useEffect(() => {
-    const settings = getSettings();
-    setSoundEnabled(settings.enabled);
-    setSoundVolume(settings.volume);
-  }, [getSettings]);
-
-  // Close on escape key
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape" && isOpen) {
-        onClose();
-      }
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
-
-  // Close on click outside
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (modalRef.current && !modalRef.current.contains(e.target as Node) && isOpen) {
-        onClose();
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isOpen, onClose]);
-
-  // Prevent body scroll when open
-  useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    dialog.current?.querySelector<HTMLInputElement>("input")?.focus();
     return () => {
+      document.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
     };
-  }, [isOpen]);
-
-  function handleSaveGroqKey() {
-    const trimmed = groqKey.trim();
-    if (trimmed) localStorage.setItem("groqApiKey", trimmed);
-    else localStorage.removeItem("groqApiKey");
-    setGroqMessage({ text: trimmed ? "Groq API key saved in this browser" : "Groq API key cleared", isError: false });
-  }
-
-  function handleSaveGeminiKey() {
-    const trimmed = geminiKey.trim();
-    if (trimmed) localStorage.setItem("geminiApiKey", trimmed);
-    else localStorage.removeItem("geminiApiKey");
-    setGeminiMessage({ text: trimmed ? "Gemini API key saved in this browser" : "Gemini API key cleared", isError: false });
-  }
-
-  if (!isOpen) return null;
+  }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50" aria-hidden="true" />
-
-      {/* Modal */}
-      <div
-        ref={modalRef}
-        className="relative bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="font-bold text-lg">Settings</h2>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-            aria-label="Close settings"
-          >
-            <svg
-              className="w-5 h-5 text-gray-600"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]" onClick={onClose} aria-hidden />
+      <div ref={dialog} className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-2xl">
+        <header className="sticky top-0 flex items-center justify-between border-b border-slate-100 bg-white px-6 py-4">
+          <h2 id="settings-title" className="text-lg font-bold">
+            Settings
+          </h2>
+          <button onClick={onClose} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Close settings">
+            ✕
           </button>
-        </div>
+        </header>
 
-        {/* Content */}
-        <div className="p-6 space-y-6">
-          {/* Groq API Key */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-semibold text-gray-700">Groq API Key</label>
-              {groqMessage && (
-                <span className={`text-xs ${groqMessage.isError ? "text-red-600" : "text-green-600"}`}>
-                  {groqMessage.text}
-                </span>
-              )}
+        <div className="space-y-6 px-6 py-5">
+          <section className="space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">API keys</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Bring your own. Keys stay in this browser and are sent only with matches that need them. Built-in engines need no key.
+              </p>
             </div>
-            <div className="flex gap-2">
-              <input
-                type="password"
-                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                value={groqKey}
-                onChange={(e) => setGroqKey(e.target.value)}
-                placeholder="gsk_..."
-              />
-              <button
-                onClick={handleSaveGroqKey}
-                className="px-4 py-2 bg-orange-500 text-white text-sm font-semibold rounded-lg hover:bg-orange-600 transition-colors"
-              >
-                Save
-              </button>
-            </div>
-            <p className="text-xs text-gray-500">
-              Required for Groq models. Get your key at{" "}
-              <a
-                href="https://console.groq.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-orange-600 hover:underline"
-              >
-                console.groq.com
-              </a>
-            </p>
-          </div>
+            {KEYED_PROVIDERS.map((p) => (
+              <KeyField key={p} provider={p} />
+            ))}
+          </section>
 
-          {/* Gemini API Key */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-semibold text-gray-700">Gemini API Key</label>
-              {geminiMessage && (
-                <span className={`text-xs ${geminiMessage.isError ? "text-red-600" : "text-green-600"}`}>
-                  {geminiMessage.text}
-                </span>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <input
-                type="password"
-                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                value={geminiKey}
-                onChange={(e) => setGeminiKey(e.target.value)}
-                placeholder="AIza..."
-              />
-              <button
-                onClick={handleSaveGeminiKey}
-                className="px-4 py-2 bg-blue-500 text-white text-sm font-semibold rounded-lg hover:bg-blue-600 transition-colors"
-              >
-                Save
-              </button>
-            </div>
-            <p className="text-xs text-gray-500">
-              Required for Gemini models. Get your key at{" "}
-              <a
-                href="https://aistudio.google.com/apikey"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-600 hover:underline"
-              >
-                aistudio.google.com
-              </a>
-            </p>
-          </div>
-
-          {/* Sound Settings */}
-          <div className="space-y-3 border-t border-gray-200 pt-6">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-semibold text-gray-700">Sound Effects</label>
-            </div>
-            <div className="flex items-center gap-3">
+          <section className="space-y-3 border-t border-slate-100 pt-5">
+            <h3 className="text-sm font-semibold text-slate-900">Sound</h3>
+            <label className="flex items-center gap-3 text-sm text-slate-700">
               <input
                 type="checkbox"
-                id="sound-enabled"
-                checked={soundEnabled}
+                checked={sound.enabled}
                 onChange={(e) => {
-                  const enabled = e.target.checked;
-                  setSoundEnabled(enabled);
-                  updateSettings({ enabled });
-                  // Play test sound when enabling
-                  if (enabled && sounds) {
-                    setTimeout(() => sounds.playMove(), 100);
-                  }
+                  setSound(setSoundSettings({ enabled: e.target.checked }));
+                  if (e.target.checked) playSound("move");
                 }}
-                className="w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500"
+                className="h-4 w-4 accent-slate-900"
               />
-              <label htmlFor="sound-enabled" className="text-sm text-gray-700 cursor-pointer">
-                Enable move sounds
-              </label>
-            </div>
-            {soundEnabled && (
-              <div className="space-y-2 pl-7">
-                <label className="text-xs text-gray-600">Volume</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={soundVolume * 100}
-                    onChange={(e) => {
-                      const volume = parseInt(e.target.value) / 100;
-                      setSoundVolume(volume);
-                      updateSettings({ volume });
-                    }}
-                    className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-orange-600"
-                  />
-                  <span className="text-xs text-gray-600 w-10 text-right">
-                    {Math.round(soundVolume * 100)}%
-                  </span>
-                </div>
-                <button
-                  onClick={() => {
-                    if (sounds) {
-                      sounds.playMove();
-                      setTimeout(() => sounds.playCapture(), 200);
-                      setTimeout(() => sounds.playCheck(), 400);
-                    }
-                  }}
-                  className="text-xs text-gray-600 hover:text-gray-800 underline"
-                >
-                  Test sounds
+              Play move sounds
+            </label>
+            {sound.enabled && (
+              <div className="flex items-center gap-3 pl-7">
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round(sound.volume * 100)}
+                  onChange={(e) => setSound(setSoundSettings({ volume: Number(e.target.value) / 100 }))}
+                  className="flex-1 accent-slate-900"
+                  aria-label="Volume"
+                />
+                <span className="w-10 text-right text-xs tabular-nums text-slate-500">{Math.round(sound.volume * 100)}%</span>
+                <button onClick={() => (["move", "capture", "check"] as const).forEach((k, i) => setTimeout(() => playSound(k, true), i * 220))} className="text-xs font-medium text-slate-600 underline underline-offset-2">
+                  Test
                 </button>
               </div>
             )}
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
-          <p className="text-xs text-gray-500 text-center">
-            Your API keys stay in this browser and are sent only with the matches you start.
-          </p>
+          </section>
         </div>
       </div>
+    </div>
+  );
+}
+
+function KeyField({ provider }: { provider: KeyedProvider }) {
+  const help = KEY_HELP[provider];
+  const [saved, setSaved] = useState(() => readKey(provider));
+  const [draft, setDraft] = useState(saved);
+  const [show, setShow] = useState(false);
+  const [flash, setFlash] = useState<string | null>(null);
+
+  function save(value: string) {
+    writeKey(provider, value);
+    const current = readKey(provider);
+    setSaved(current);
+    setDraft(current);
+    setFlash(current ? "Saved" : "Removed");
+    setTimeout(() => setFlash(null), 1500);
+  }
+
+  const dirty = draft.trim() !== saved;
+  const id = `key-${provider}`;
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between">
+        <label htmlFor={id} className="text-xs font-semibold text-slate-700">
+          {help.label}
+        </label>
+        <span className="text-[11px] text-slate-500">
+          {flash ? <span className="text-emerald-600">{flash}</span> : saved ? `Saved · ${maskKey(saved)}` : "Not set"}
+        </span>
+      </div>
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <input
+            id={id}
+            type={show ? "text" : "password"}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && dirty && save(draft)}
+            placeholder={help.placeholder}
+            autoComplete="off"
+            spellCheck={false}
+            className="w-full rounded-lg border border-slate-200 py-2 pl-3 pr-12 font-mono text-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+            data-testid={`key-input-${provider}`}
+          />
+          <button
+            type="button"
+            onClick={() => setShow((v) => !v)}
+            className="absolute inset-y-0 right-2 text-[11px] font-medium text-slate-500 hover:text-slate-800"
+            aria-label={show ? "Hide key" : "Show key"}
+          >
+            {show ? "Hide" : "Show"}
+          </button>
+        </div>
+        <button
+          onClick={() => save(draft)}
+          disabled={!dirty}
+          className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:bg-slate-200 disabled:text-slate-500"
+          data-testid={`key-save-${provider}`}
+        >
+          Save
+        </button>
+        {saved && (
+          <button onClick={() => save("")} className="rounded-lg px-2 text-sm text-slate-500 hover:bg-slate-100" aria-label={`Remove ${help.label} key`}>
+            Remove
+          </button>
+        )}
+      </div>
+      <p className="mt-1 text-[11px] text-slate-400">
+        Get one at{" "}
+        <a href={help.url} target="_blank" rel="noopener noreferrer" className="text-slate-600 underline underline-offset-2">
+          {help.host}
+        </a>
+      </p>
     </div>
   );
 }

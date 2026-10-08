@@ -4,6 +4,7 @@ import { games, moves } from "@/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { z } from "zod";
 import { analyzeGame, type Color } from "@/lib/analysis";
+import { GameIdSchema } from "@/types/api";
 
 // Body: the start-position eval plus the White-perspective eval of the position
 // after every ply, keyed by move id. Produced client-side by the Stockfish worker.
@@ -22,6 +23,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  if (!GameIdSchema.safeParse(id).success) {
+    return NextResponse.json({ error: "Game not found" }, { status: 404 });
+  }
 
   const body = await request.json().catch(() => null);
   const parsed = AnalysisSchema.safeParse(body);
@@ -47,15 +51,17 @@ export async function POST(
     .select({ id: moves.id, color: moves.color })
     .from(moves)
     .where(eq(moves.gameId, id))
-    // moveNumber first: the FEN fullmove number is shared by both plies of a
-    // pair, and createdAt only breaks the white/black tie within it. The other
-    // way round, a createdAt tie could swap ply order across pairs.
-    .orderBy(asc(moves.moveNumber), asc(moves.createdAt));
+    // Ply order: the fullmove number is shared by both plies of a pair, and
+    // color (enum order white < black) breaks the tie deterministically.
+    .orderBy(asc(moves.moveNumber), asc(moves.color), asc(moves.createdAt));
 
   if (gameMoves.length === 0) {
     return NextResponse.json({ error: "Game has no moves to analyze" }, { status: 400 });
   }
 
+  if (parsed.data.evals.length !== gameMoves.length) {
+    return NextResponse.json({ error: "Expected one evaluation per move" }, { status: 400 });
+  }
   const evalMap = new Map(parsed.data.evals.map((e) => [e.moveId, e.evalCp]));
   const plies: Array<{ color: Color; evalCp: number }> = [];
   for (const m of gameMoves) {
