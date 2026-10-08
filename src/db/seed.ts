@@ -2,6 +2,8 @@
  * Seeds the model roster. Non-destructive by design: upserts names/providers,
  * keeps ratings and history, and deactivates retired models (rows referenced by
  * past games can't be deleted). There is deliberately no way to wipe the arena.
+ * Check ids against what the providers serve with
+ * `tsx scripts/list-available-models.ts` before changing them.
  *
  *   pnpm db:seed
  */
@@ -21,24 +23,24 @@ export const ROSTER: Array<{ id: string; name: string; provider: string }> = [
   // Groq
   { id: "groq/openai/gpt-oss-120b", name: "GPT-OSS 120B", provider: "groq" },
   { id: "groq/openai/gpt-oss-20b", name: "GPT-OSS 20B", provider: "groq" },
-  { id: "groq/qwen/qwen3.6-27b", name: "Qwen 3.6 27B", provider: "groq" },
+  { id: "groq/qwen/qwen3.8-27b", name: "Qwen 3.8 27B", provider: "groq" },
 
   // Google Gemini
+  { id: "google/models/gemini-3.8-flash", name: "Gemini 3.8 Flash", provider: "google" },
   { id: "google/models/gemini-3.5-flash", name: "Gemini 3.5 Flash", provider: "google" },
+  { id: "google/models/gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite", provider: "google" },
   { id: "google/models/gemini-3.1-pro-preview", name: "Gemini 3.1 Pro Preview", provider: "google" },
-  { id: "google/models/gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite", provider: "google" },
-  { id: "google/models/gemini-3-flash-preview", name: "Gemini 3 Flash Preview", provider: "google" },
-  { id: "google/models/gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "google" },
-  { id: "google/models/gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "google" },
 
   // Anthropic
+  { id: "anthropic/claude-fable-5-1", name: "Claude Fable 5.1", provider: "anthropic" },
   { id: "anthropic/claude-opus-5-5", name: "Claude Opus 5.5", provider: "anthropic" },
   { id: "anthropic/claude-sonnet-5-5", name: "Claude Sonnet 5.5", provider: "anthropic" },
-  { id: "anthropic/claude-haiku-4-5", name: "Claude Haiku 4.5", provider: "anthropic" },
+  { id: "anthropic/claude-haiku-5-5", name: "Claude Haiku 5.5", provider: "anthropic" },
 
   // OpenAI
-  { id: "openai/gpt-5.6-terra", name: "GPT-5.6 Terra", provider: "openai" },
-  { id: "openai/gpt-5.6-luna", name: "GPT-5.6 Luna", provider: "openai" },
+  { id: "openai/gpt-6-astra", name: "GPT-6 Astra", provider: "openai" },
+  { id: "openai/gpt-6.1-sol", name: "GPT-6.1 Sol", provider: "openai" },
+  { id: "openai/gpt-6-luna", name: "GPT-6 Luna", provider: "openai" },
 ];
 
 type Db = ReturnType<typeof drizzle>;

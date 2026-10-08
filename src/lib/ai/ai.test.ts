@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { APICallError } from "ai";
 import { parseAIResponse, stripThinking, jsonObjects } from "./parse";
 import { buildPrompt, renderBoard } from "./prompt";
-import { effortOptions, planCall, providerOf, providerModelName, resolveKey, timeoutFor } from "./providers";
+import { effortOptions, isAdaptiveClaude, planCall, providerOf, providerModelName, resolveKey, timeoutFor } from "./providers";
 import { APIKeyError, RateLimitError, ModelUnavailableError, TimeoutError, ParseError, ProviderError } from "../errors";
 import { STARTING_FEN } from "../chess";
 import { scoreMoves } from "../engine";
@@ -150,7 +150,7 @@ describe("providers", () => {
     expect(providerOf("groq/openai/gpt-oss-120b")).toBe("groq");
     expect(providerOf("google/models/gemini-3.5-flash")).toBe("google");
     expect(providerOf("anthropic/claude-sonnet-5-5")).toBe("anthropic");
-    expect(providerOf("openai/gpt-5.6-terra")).toBe("openai");
+    expect(providerOf("openai/gpt-6-astra")).toBe("openai");
     expect(providerOf("local/engine-3")).toBe("local");
     expect(providerOf("xai/grok-4")).toBe("gateway");
     expect(providerModelName("groq/openai/gpt-oss-120b")).toBe("openai/gpt-oss-120b");
@@ -160,16 +160,24 @@ describe("providers", () => {
   it("maps effort onto each provider's reasoning controls", () => {
     expect(effortOptions("groq/openai/gpt-oss-120b", "minimal")).toEqual({ groq: { reasoningEffort: "low" } });
     expect(effortOptions("groq/openai/gpt-oss-120b", "high")).toEqual({ groq: { reasoningEffort: "high" } });
-    expect(effortOptions("groq/qwen/qwen3.6-27b", "low")).toEqual({ groq: { reasoningEffort: "none", reasoningFormat: "hidden" } });
-    expect(effortOptions("groq/qwen/qwen3.6-27b", "high")).toEqual({ groq: { reasoningEffort: "default", reasoningFormat: "hidden" } });
+    expect(effortOptions("groq/qwen/qwen3.8-27b", "low")).toEqual({ groq: { reasoningEffort: "none", reasoningFormat: "hidden" } });
+    expect(effortOptions("groq/qwen/qwen3.8-27b", "high")).toEqual({ groq: { reasoningEffort: "default", reasoningFormat: "hidden" } });
     expect(effortOptions("groq/llama-3.3-70b", "high")).toBeUndefined();
-    expect(effortOptions("google/models/gemini-3.5-flash", "medium")).toEqual({ google: { thinkingConfig: { thinkingLevel: "low" } } });
+    expect(effortOptions("google/models/gemini-3.8-flash", "medium")).toEqual({ google: { thinkingConfig: { thinkingLevel: "low" } } });
+    expect(effortOptions("google/models/gemini-3.5-flash-lite", "high")).toEqual({ google: { thinkingConfig: { thinkingLevel: "high" } } });
     expect(effortOptions("google/models/gemini-3.1-pro-preview", "high")).toEqual({ google: { thinkingConfig: { thinkingLevel: "high" } } });
     expect(effortOptions("google/models/gemini-2.5-flash", "minimal")).toEqual({ google: { thinkingConfig: { thinkingBudget: 0 } } });
     expect(effortOptions("google/models/gemini-2.5-pro", "minimal")).toEqual({ google: { thinkingConfig: { thinkingBudget: 128 } } });
+    // Current Claude: adaptive thinking steered by effort (budgets are rejected).
+    expect(effortOptions("anthropic/claude-sonnet-5-5", "high")).toEqual({ anthropic: { effort: "high" } });
+    expect(effortOptions("anthropic/claude-opus-5-5", "medium")).toEqual({ anthropic: { effort: "medium" } });
+    expect(effortOptions("anthropic/claude-haiku-5-5", "minimal")).toEqual({ anthropic: { effort: "low" } });
+    expect(effortOptions("anthropic/claude-fable-5-1", "low")).toEqual({ anthropic: { effort: "low" } });
+    // Older Claude keeps the manual thinking budget.
     expect(effortOptions("anthropic/claude-haiku-4-5", "low")).toBeUndefined();
-    expect(effortOptions("anthropic/claude-sonnet-5-5", "high")).toEqual({ anthropic: { thinking: { type: "enabled", budgetTokens: 4096 } } });
-    expect(effortOptions("openai/gpt-5.6-terra", "minimal")).toEqual({ openai: { reasoningEffort: "low" } });
+    expect(effortOptions("anthropic/claude-haiku-4-5", "high")).toEqual({ anthropic: { thinking: { type: "enabled", budgetTokens: 4096 } } });
+    expect(effortOptions("openai/gpt-6-astra", "minimal")).toEqual({ openai: { reasoningEffort: "low" } });
+    expect(effortOptions("openai/gpt-6-luna", "high")).toEqual({ openai: { reasoningEffort: "high" } });
     expect(effortOptions("xai/grok-4", "high")).toBeUndefined();
   });
 
@@ -187,10 +195,31 @@ describe("providers", () => {
     expect(resolveKey("groq", {})).toBeUndefined();
   });
 
-  it("plans calls: drops temperature with thinking and adds the budget to max tokens", () => {
-    const plan = planCall("anthropic/claude-sonnet-5-5", { effort: "high", temperature: 0.2, keys: { anthropic: "k" } });
-    expect(plan.temperature).toBeUndefined();
-    expect(plan.maxOutputTokens).toBe(8192 + 4096);
+  it("recognises adaptive-thinking Claude models", () => {
+    for (const name of ["claude-fable-5-1", "claude-mythos-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-sonnet-5", "claude-opus-4-8", "claude-sonnet-4-6"]) {
+      expect(isAdaptiveClaude(name), name).toBe(true);
+    }
+    for (const name of ["claude-haiku-4-5", "claude-opus-4-5-20251101", "claude-sonnet-4-5-20250929", "claude-opus-4-1"]) {
+      expect(isAdaptiveClaude(name), name).toBe(false);
+    }
+  });
+
+  it("plans calls: drops temperature for thinking models and leaves room to think", () => {
+    const legacy = planCall("anthropic/claude-haiku-4-5", { effort: "high", temperature: 0.2, keys: { anthropic: "k" } });
+    expect(legacy.temperature).toBeUndefined();
+    expect(legacy.maxOutputTokens).toBe(8192 + 4096);
+    const legacyQuick = planCall("anthropic/claude-haiku-4-5", { effort: "low", temperature: 0.7, keys: { anthropic: "k" } });
+    expect(legacyQuick.temperature).toBe(0.7);
+    for (const id of ["anthropic/claude-opus-5-5", "anthropic/claude-haiku-5-5"]) {
+      const plan = planCall(id, { effort: "minimal", temperature: 0.9, keys: { anthropic: "k" } });
+      expect(plan.temperature).toBeUndefined();
+      expect(plan.maxOutputTokens).toBe(1024 * 2);
+    }
+    const gpt = planCall("openai/gpt-6.1-sol", { effort: "low", temperature: 0.7, keys: { openai: "k" } });
+    expect(gpt.temperature).toBeUndefined();
+    expect(gpt.maxOutputTokens).toBe(2048);
+    const gemini = planCall("google/models/gemini-3.8-flash", { effort: "low", temperature: 0.7, keys: { google: "k" } });
+    expect(gemini.temperature).toBe(0.7);
     const quick = planCall("groq/openai/gpt-oss-20b", { effort: "minimal", temperature: 0.9, keys: { groq: "k" } });
     expect(quick.temperature).toBe(0.9);
     expect(quick.maxOutputTokens).toBe(1024);
