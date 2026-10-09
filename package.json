@@ -21,11 +21,11 @@
     "healthcheck": "tsx scripts/model-healthcheck.ts"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^2.0.50",
-    "@ai-sdk/google": "^2.0.44",
+    "@ai-sdk/anthropic": "^2.0.109",
+    "@ai-sdk/google": "^2.0.102",
     "@ai-sdk/groq": "2.0.57",
-    "@ai-sdk/openai": "^2.0.74",
-    "ai": "^5.0.104",
+    "@ai-sdk/openai": "^2.0.133",
+    "ai": "^5.0.273",
     "chess.js": "^1.4.0",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.44.7",

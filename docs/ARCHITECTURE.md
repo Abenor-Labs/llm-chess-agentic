@@ -66,7 +66,7 @@ Everything the judge did is stored as structured events in `moves.judge` and sho
 
 A skill mode (`modes.ts`) sets:
 
-- **effort** → provider reasoning controls (`ai/providers.ts`), output-token budget and timeout
+- **effort** → provider reasoning controls (`ai/providers.ts`: Groq `reasoning_effort`, Gemini `thinkingLevel`, Claude `effort`, OpenAI `reasoningEffort`), output-token budget and timeout. Models that reason before answering (current Claude, GPT-5+) get no custom temperature, since they reject it.
 - **temperature**
 - **brief**: none / basic (material, check) / threats (loose pieces for both sides)
 - **hints**: an advisory engine shortlist (strategist and above), optionally with scores

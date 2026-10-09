@@ -59,7 +59,8 @@ export interface CallPlan {
 /**
  * Maps a skill mode's effort onto each provider's reasoning controls:
  * Groq reasoning_effort (gpt-oss / qwen), Gemini thinkingLevel (3.x) or
- * thinkingBudget (2.5), Claude extended thinking, OpenAI reasoningEffort.
+ * thinkingBudget (2.5), Claude effort (adaptive thinking) or a thinking budget
+ * (older Claude), OpenAI reasoningEffort.
  */
 export function effortOptions(modelId: string, effort: Effort): ProviderOptions | undefined {
   const provider = providerOf(modelId);
@@ -94,6 +95,9 @@ export function effortOptions(modelId: string, effort: Effort): ProviderOptions 
   }
 
   if (provider === "anthropic") {
+    if (isAdaptiveClaude(name)) {
+      return { anthropic: { effort: effort === "high" ? "high" : effort === "medium" ? "medium" : "low" } };
+    }
     if (effort === "medium") return { anthropic: { thinking: { type: "enabled", budgetTokens: 1_024 } } };
     if (effort === "high") return { anthropic: { thinking: { type: "enabled", budgetTokens: 4_096 } } };
     return undefined;
@@ -105,6 +109,21 @@ export function effortOptions(modelId: string, effort: Effort): ProviderOptions 
   }
 
   return undefined;
+}
+
+/**
+ * Claude 4.6+ thinks adaptively, steered by `effort`. From 4.7 on (and every
+ * 5.x model) manual thinking budgets and sampling parameters are rejected.
+ */
+export function isAdaptiveClaude(name: string): boolean {
+  return /claude-(fable|mythos)-|claude-(opus|sonnet|haiku)-([5-9]|\d{2,}|4-([6-9]|\d{2,}))\b/.test(name.toLowerCase());
+}
+
+/** Models that refuse a custom temperature (they reason before answering). */
+function rejectsTemperature(provider: ProviderId, name: string): boolean {
+  if (provider === "anthropic") return isAdaptiveClaude(name);
+  if (provider === "openai") return /^(o\d|gpt-([5-9]|\d{2,}))/.test(name.toLowerCase()) && !name.includes("chat");
+  return false;
 }
 
 function thinkingBudget(options: ProviderOptions | undefined): number {
@@ -140,12 +159,15 @@ export function planCall(
             : createOpenAI({ apiKey })(name);
   }
 
+  // Adaptive Claude thinks inside max_tokens, so leave it room to think.
+  const thinkingRoom = provider === "anthropic" && isAdaptiveClaude(name) ? OUTPUT_TOKENS[opts.effort] : budget;
+
   return {
     provider,
     model,
-    // Extended thinking requires the default temperature.
-    temperature: budget > 0 ? undefined : opts.temperature,
-    maxOutputTokens: OUTPUT_TOKENS[opts.effort] + budget,
+    // Thinking models require the default temperature.
+    temperature: budget > 0 || rejectsTemperature(provider, name) ? undefined : opts.temperature,
+    maxOutputTokens: OUTPUT_TOKENS[opts.effort] + thinkingRoom,
     providerOptions,
     timeoutMs,
   };
