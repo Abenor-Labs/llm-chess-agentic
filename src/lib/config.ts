@@ -11,6 +11,7 @@ export const AI_TIMEOUTS = {
     google: 40_000,
     anthropic: 40_000,
     openai: 45_000,
+    subq: 60_000,
     gateway: 30_000,
   },
   EFFORT_MULTIPLIER: { minimal: 1, low: 1, medium: 1.5, high: 2.5 } satisfies Record<Effort, number>,

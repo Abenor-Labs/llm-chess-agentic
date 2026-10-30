@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { requestMove } from "./index";
 import { STARTING_FEN } from "../chess";
-import { ProviderError } from "../errors";
+import { APIKeyError, ModelUnavailableError, ParseError, ProviderError } from "../errors";
 
 /**
  * What actually goes over the wire for each provider, through the real AI SDK.
@@ -24,7 +24,7 @@ async function captureRequest(modelId: string, mode: string) {
       });
     }),
   );
-  const keys = { groq: "k", google: "k", anthropic: "k", openai: "k" };
+  const keys = { groq: "k", google: "k", anthropic: "k", openai: "k", subq: "k" };
   await expect(requestMove(modelId, ctx(mode), { keys })).rejects.toBeInstanceOf(ProviderError);
   expect(calls).toHaveLength(1);
   return calls[0];
@@ -32,6 +32,7 @@ async function captureRequest(modelId: string, mode: string) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("provider requests", () => {
@@ -83,5 +84,54 @@ describe("provider requests", () => {
   it("groq/openai/gpt-oss-120b: reasoning effort", async () => {
     const { body } = await captureRequest("groq/openai/gpt-oss-120b", "grandmaster");
     expect(body).toMatchObject({ model: "openai/gpt-oss-120b", reasoning_effort: "high" });
+  });
+
+  it("anthropic ignores an inherited ANTHROPIC_BASE_URL without /v1", async () => {
+    vi.stubEnv("ANTHROPIC_BASE_URL", "https://api.anthropic.com");
+    const { url } = await captureRequest("anthropic/claude-haiku-5-5", "scholar");
+    expect(url).toBe("https://api.anthropic.com/v1/messages");
+  });
+
+  it("subq/subq-preview: chat completions, max_tokens, effort one step up", async () => {
+    for (const [mode, effort] of [["novice", "low"], ["scholar", "medium"], ["strategist", "high"], ["grandmaster", "max"]] as const) {
+      const { url, body } = await captureRequest("subq/subq-preview", mode);
+      expect(url).toBe("https://api.subq.ai/v1/chat/completions");
+      expect(body).toMatchObject({ model: "subq-preview", reasoning_effort: effort });
+      expect(body.max_tokens).toBeGreaterThanOrEqual(3072);
+      expect(body).not.toHaveProperty("max_completion_tokens");
+    }
+  });
+
+  it("subq/subq-snap-1.1: picks from the legal moves via the Decisions API", async () => {
+    const { url, body } = await captureRequest("subq/subq-snap-1.1", "grandmaster");
+    expect(url).toBe("https://api.subq.ai/v1/systemone");
+    expect(body.model).toBe("subq-snap-1.1");
+    const q = (body.questions as { move: { type: string; criteria: Record<string, string> } }).move;
+    expect(q.type).toBe("choice");
+    expect(Object.keys(q.criteria)).toHaveLength(20);
+    expect(q.criteria.g1f3).toBe("Nf3");
+    expect(String(body.state)).toContain("FEN:");
+  });
+});
+
+describe("subq snap replies", () => {
+  const reply = (status: number, json: unknown) =>
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(json), { status, headers: { "content-type": "application/json" } })));
+  const ask = () => requestMove("subq/subq-snap-1.1", ctx("scholar"), { keys: { subq: "k" } });
+
+  it("maps the chosen UCI back to SAN", async () => {
+    reply(200, { answers: { move: { type: "choice", choice: "e2e4", confidence: 0.8, probabilities: { e2e4: 0.6, d2d4: 0.3 } } } });
+    const r = await ask();
+    expect(r.move).toBe("e4");
+    expect(r.reasoning).toContain("e4 60%");
+  });
+
+  it("an unknown choice is a parse error; 402 (no credits) is fatal", async () => {
+    reply(200, { answers: { move: { choice: "zz" } } });
+    await expect(ask()).rejects.toBeInstanceOf(ParseError);
+    reply(402, { error: "insufficient credits" });
+    await expect(ask()).rejects.toBeInstanceOf(APIKeyError);
+    reply(403, { error: { message: "Model 'subq-snap-1.1' is not permitted for this API key", code: "model_not_allowed" } });
+    await expect(ask()).rejects.toBeInstanceOf(ModelUnavailableError);
   });
 });

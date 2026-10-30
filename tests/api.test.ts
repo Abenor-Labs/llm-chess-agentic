@@ -25,6 +25,17 @@ vi.mock("ai", async (importOriginal) => {
 const { generateText } = await import("ai");
 const mockedGenerate = vi.mocked(generateText);
 
+// Auth lives in Neon; tests swap the session user directly.
+const session = vi.hoisted(() => ({ user: { id: "u-admin", email: "admin@test", name: "Admin", role: "admin" } as { id: string; email: string; name: string; role?: string } | null }));
+// Self-contained: the real module imports next/headers, which only resolves inside Next.
+vi.mock("@/lib/auth/server", () => ({
+  requireUser: async (opts: { admin?: boolean } = {}) => {
+    if (!session.user) return Response.json({ error: "Sign in to do that." }, { status: 401 });
+    if (opts.admin && session.user.role !== "admin") return Response.json({ error: "Only the admin can do that." }, { status: 403 });
+    return session.user;
+  },
+}));
+
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 const get = (url: string) => new Request(`http://localhost${url}`);
 
@@ -76,6 +87,26 @@ describe.skipIf(!hasDb)("API routes (real database)", () => {
   });
   afterEach(() => {
     process.env = { ...env };
+    session.user = { id: "u-admin", email: "admin@test", name: "Admin", role: "admin" };
+  });
+
+  describe("auth", () => {
+    it("requires a signed-in user to start a match, and records who started it", async () => {
+      session.user = null;
+      expect((await start(jsonRequest("/api/games/start", { modelIds: ["local/engine-2", "local/random"] }))).status).toBe(401);
+      session.user = { id: "u-player", email: "p@test", name: "Player", role: "user" };
+      const body = await (await start(jsonRequest("/api/games/start", { modelIds: ["local/engine-2", "local/random"] }))).json();
+      expect(await getGame(body.gameId)).toMatchObject({ startedBy: "u-player" });
+    });
+
+    it("lets only the admin stop a match", async () => {
+      const game = await createGame({ whiteId: "local/random", blackId: "local/greedy" });
+      session.user = null;
+      expect((await destroy(jsonRequest("/api/games/destroy", {}))).status).toBe(401);
+      session.user = { id: "u-player", email: "p@test", name: "Player", role: "user" };
+      expect((await destroy(jsonRequest("/api/games/destroy", {}))).status).toBe(403);
+      expect(await getGame(game.id)).toMatchObject({ status: "active" });
+    });
   });
 
   describe("POST /api/games/start", () => {
@@ -225,7 +256,7 @@ describe.skipIf(!hasDb)("API routes (real database)", () => {
       const game = await createGame({ whiteId: "local/random", blackId: "local/greedy" });
       await processGame(game, 0);
       await destroy(jsonRequest("/api/games/destroy", { gameId: game.id }));
-      expect(await getGame(game.id)).toMatchObject({ status: "complete", result: null, resultReason: "Match stopped by user" });
+      expect(await getGame(game.id)).toMatchObject({ status: "complete", result: null, resultReason: "Match stopped by the admin" });
       const rows = await db.select().from(models);
       expect(rows.every((m) => m.gamesPlayed === 0)).toBe(true);
     });

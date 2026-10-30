@@ -8,6 +8,7 @@ import { providerOf, isKeyedProvider, resolveKey, PROVIDER_LABEL, type ApiKeys, 
 import { StartGameRequestSchema } from "@/types/api";
 import { encryptSecret } from "@/lib/crypto";
 import { DEFAULT_MODE } from "@/lib/modes";
+import { requireUser } from "@/lib/auth/server";
 
 // The first ply is played synchronously so a rejected key surfaces right here.
 // Must be a literal for Next.js; tests assert it equals GAME_RULES.TICK_MAX_DURATION_S.
@@ -20,6 +21,8 @@ class StartError extends Error {
 }
 
 export async function POST(request: Request) {
+  const user = await requireUser();
+  if (user instanceof Response) return user;
   const body = await request.json().catch(() => null);
   const parsed = StartGameRequestSchema.safeParse(body);
   if (!parsed.success) {
@@ -34,6 +37,7 @@ export async function POST(request: Request) {
     google: parsed.data.keys?.google || parsed.data.geminiApiKey,
     anthropic: parsed.data.keys?.anthropic,
     openai: parsed.data.keys?.openai,
+    subq: parsed.data.keys?.subq,
   };
   const needed = new Set(modelIds.map(providerOf).filter(isKeyedProvider));
   for (const provider of needed) {
@@ -74,12 +78,14 @@ export async function POST(request: Request) {
         blackId,
         status: "active",
         startedAt: new Date(),
+        startedBy: user.id,
         whiteMode: whiteMode ?? DEFAULT_MODE,
         blackMode: blackMode ?? DEFAULT_MODE,
         groqApiKey: stored("groq"),
         geminiApiKey: stored("google"),
         anthropicApiKey: stored("anthropic"),
         openaiApiKey: stored("openai"),
+        subqApiKey: stored("subq"),
       });
       await tx
         .insert(tournament)

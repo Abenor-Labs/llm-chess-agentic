@@ -12,6 +12,7 @@ const STORAGE_KEY: Record<KeyedProvider, string> = {
   google: "geminiApiKey",
   anthropic: "anthropicApiKey",
   openai: "openaiApiKey",
+  subq: "subqApiKey",
 };
 
 export const KEY_HELP: Record<KeyedProvider, { label: string; placeholder: string; url: string; host: string }> = {
@@ -19,6 +20,7 @@ export const KEY_HELP: Record<KeyedProvider, { label: string; placeholder: strin
   google: { label: "Google Gemini", placeholder: "AIza…", url: "https://aistudio.google.com/apikey", host: "aistudio.google.com" },
   anthropic: { label: "Anthropic", placeholder: "sk-ant-…", url: "https://console.anthropic.com/settings/keys", host: "console.anthropic.com" },
   openai: { label: "OpenAI", placeholder: "sk-…", url: "https://platform.openai.com/api-keys", host: "platform.openai.com" },
+  subq: { label: "SubQ", placeholder: "subq_…", url: "https://console.subq.ai", host: "console.subq.ai" },
 };
 
 export const KEYS_CHANGED_EVENT = "arena:keys-changed";

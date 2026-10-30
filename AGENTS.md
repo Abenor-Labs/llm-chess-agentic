@@ -22,6 +22,7 @@ A throwaway Postgres for tests: `docker compose up -d` (port 5434), or any local
 - **Client code must not import `@/lib/ai`** (it pulls provider SDKs). Use `@/lib/provider-ids` for provider metadata.
 - **Route segment config must be literal** (`export const maxDuration = 300`). `tests/api.test.ts` asserts it matches `GAME_RULES.TICK_MAX_DURATION_S`.
 - New DB columns: add to `src/db/schema.ts` **and** a new idempotent `drizzle/00NN_*.sql` (`IF NOT EXISTS`, guarded `DO` blocks).
+- **Provider base URLs are pinned** where an inherited env var could break them: Anthropic uses `https://api.anthropic.com/v1` explicitly (a shell `ANTHROPIC_BASE_URL` without `/v1` 404s every call). SubQ (`subq/…`, key `SUBQ_API_KEY`) goes to `https://api.subq.ai/v1`: `subq-preview` via OpenAI-compatible Chat Completions (`max_tokens`, effort mapped one step up to `max`), `subq-snap-*` (1.1, preview) via the Decisions API (`/systemone`), choosing from the legal moves (UCI keys → SAN). HTTP 402 (no credits) is fatal.
 - Errors: fatal (`APIKeyError`, `RateLimitError`, `ModelUnavailableError`) vs transient (`TimeoutError`, `ParseError`, `ProviderError`) — see `src/lib/errors.ts` and the failure table in the architecture doc.
 
 ## Security posture

@@ -5,10 +5,10 @@
  * or "google/models/gemini-3.5-flash". "local/..." ids are built-in engine bots
  * that never call an API. Anything else is routed through the Vercel AI Gateway.
  */
-export type ProviderId = "groq" | "google" | "anthropic" | "openai" | "local" | "gateway";
+export type ProviderId = "groq" | "google" | "anthropic" | "openai" | "subq" | "local" | "gateway";
 
 /** Providers whose keys users bring themselves. */
-export const KEYED_PROVIDERS = ["groq", "google", "anthropic", "openai"] as const;
+export const KEYED_PROVIDERS = ["groq", "google", "anthropic", "openai", "subq"] as const;
 export type KeyedProvider = (typeof KEYED_PROVIDERS)[number];
 
 export type ApiKeys = Partial<Record<KeyedProvider, string | null | undefined>>;
@@ -18,13 +18,14 @@ export const PROVIDER_LABEL: Record<ProviderId, string> = {
   google: "Google",
   anthropic: "Anthropic",
   openai: "OpenAI",
+  subq: "SubQ",
   local: "Built-in",
   gateway: "AI Gateway",
 };
 
 export function providerOf(modelId: string): ProviderId {
   const prefix = modelId.split("/")[0];
-  if (prefix === "groq" || prefix === "google" || prefix === "anthropic" || prefix === "openai" || prefix === "local") {
+  if (prefix === "groq" || prefix === "google" || prefix === "anthropic" || prefix === "openai" || prefix === "subq" || prefix === "local") {
     return prefix;
   }
   return "gateway";

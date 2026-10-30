@@ -93,6 +93,7 @@ function gameKeys(game: Game): ApiKeys {
     google: decryptSecret(game.geminiApiKey),
     anthropic: decryptSecret(game.anthropicApiKey),
     openai: decryptSecret(game.openaiApiKey),
+    subq: decryptSecret(game.subqApiKey),
   };
 }
 

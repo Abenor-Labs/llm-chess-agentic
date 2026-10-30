@@ -28,7 +28,11 @@ export default function Home() {
   }, [refetch]);
 
   if (gameId === undefined) {
-    return <div className="flex min-h-[60vh] items-center justify-center text-slate-500">Loading…</div>;
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center text-sm text-slate-500" role="status">
+        Loading…
+      </div>
+    );
   }
   if (gameId) return <GameView key={gameId} gameId={gameId} onNewGame={backToSetup} onGone={backToSetup} />;
   return <MatchSetup onStarted={setGameId} />;

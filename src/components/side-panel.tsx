@@ -38,7 +38,7 @@ export function SidePanel({ color, model, mode, moves, shown, thinking, thinking
     <section
       className={cn(
         "flex min-h-0 flex-col overflow-hidden rounded-xl border bg-white shadow-sm transition-colors",
-        thinking ? "border-amber-300 ring-2 ring-amber-200" : "border-slate-200",
+        thinking ? "border-amber-300" : "border-slate-200",
       )}
       data-testid={`side-panel-${color}`}
     >
@@ -79,12 +79,12 @@ export function SidePanel({ color, model, mode, moves, shown, thinking, thinking
       {focus ? (
         <FocusMove move={focus.m} ply={focus.ply} />
       ) : (
-        <p className="px-4 py-6 text-sm italic text-slate-400">No moves yet.</p>
+        <p className="px-4 py-6 text-sm text-slate-400">No moves yet.</p>
       )}
 
       {visible.length > 1 && (
         <div className="min-h-0 flex-1 overflow-y-auto border-t border-slate-100">
-          <h3 className="sticky top-0 bg-white/95 px-4 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-slate-400 backdrop-blur">
+          <h3 className="sticky top-0 bg-white/95 px-4 pb-1 pt-3 text-[11px] font-medium text-slate-400 backdrop-blur">
             Earlier thoughts
           </h3>
           <ol className="space-y-1 px-2 pb-3">
@@ -95,7 +95,7 @@ export function SidePanel({ color, model, mode, moves, shown, thinking, thinking
                 <li key={m.id}>
                   <button
                     onClick={() => onSelectPly(ply)}
-                    className="w-full rounded-lg px-2 py-1.5 text-left hover:bg-slate-50 focus:bg-slate-50 focus:outline-none"
+                    className="w-full rounded-lg px-2 py-1.5 text-left hover:bg-slate-50"
                   >
                     <span className="font-mono text-xs font-semibold text-slate-700">
                       {m.moveNumber}

@@ -31,11 +31,11 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]" onClick={onClose} aria-hidden />
       <div ref={dialog} className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-2xl">
-        <header className="sticky top-0 flex items-center justify-between border-b border-slate-100 bg-white px-6 py-4">
-          <h2 id="settings-title" className="text-lg font-bold">
+        <header className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-5 py-4 sm:px-6">
+          <h2 id="settings-title" className="text-lg font-semibold text-slate-900">
             Settings
           </h2>
           <button onClick={onClose} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Close settings">
@@ -43,7 +43,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
           </button>
         </header>
 
-        <div className="space-y-6 px-6 py-5">
+        <div className="space-y-6 px-5 py-5 sm:px-6">
           <section className="space-y-4">
             <div>
               <h3 className="text-sm font-semibold text-slate-900">API keys</h3>
@@ -148,7 +148,7 @@ function KeyField({ provider }: { provider: KeyedProvider }) {
         <button
           onClick={() => save(draft)}
           disabled={!dirty}
-          className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:bg-slate-200 disabled:text-slate-500"
+          className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:bg-slate-100 disabled:text-slate-400"
           data-testid={`key-save-${provider}`}
         >
           Save

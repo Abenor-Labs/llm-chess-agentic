@@ -9,12 +9,14 @@ import { KEYED_PROVIDERS, PROVIDER_LABEL, isKeyedProvider, providerOf, type Keye
 import { KEYS_CHANGED_EVENT, readAllKeys } from "@/lib/client-keys";
 import { STARTING_FEN } from "@/lib/chess";
 import { cn } from "@/lib/utils";
+import posthog from "posthog-js";
 import { Board } from "./board";
-import { ProviderChip, RatedChip, SideDot } from "./badges";
+import { useSessionUser } from "./user-menu";
+import { RatedChip, SideDot } from "./badges";
 
 type KeyState = "built-in" | "browser" | "server" | "missing";
 
-const PROVIDER_ORDER: ProviderId[] = ["local", "groq", "google", "anthropic", "openai", "gateway"];
+const PROVIDER_ORDER: ProviderId[] = ["local", "groq", "google", "anthropic", "openai", "subq", "gateway"];
 
 /** Which keys are available: this browser's, or the server's fallback. */
 function useKeyAvailability() {
@@ -46,7 +48,7 @@ function useKeyAvailability() {
 }
 
 export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void }) {
-  const { models, isLoading, error: rosterError } = useLeaderboard();
+  const { models, isLoading, error: rosterError, refetch } = useLeaderboard();
   const { openSettings } = useSettings();
   const keyState = useKeyAvailability();
   const [whiteId, setWhiteId] = useState<string | null>(null);
@@ -57,6 +59,7 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
   const [error, setError] = useState<{ message: string; provider?: KeyedProvider; running?: boolean } | null>(null);
 
   const playable = useMemo(() => models.filter((m) => m.active), [models]);
+  const { user } = useSessionUser();
   const white = playable.find((m) => m.id === whiteId) ?? null;
   const black = playable.find((m) => m.id === blackId) ?? null;
   const missing = [white, black]
@@ -79,6 +82,10 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
 
   async function start() {
     if (!white || !black) return;
+    if (!user) {
+      window.location.assign("/auth/sign-in?next=/");
+      return;
+    }
     if (white.id === black.id) {
       setError({ message: "Pick two different models — a model can't play itself." });
       return;
@@ -104,6 +111,7 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
         setError({ message: body.error ?? "Failed to start the match", provider: body.provider, running: res.status === 409 });
         return;
       }
+      posthog.capture("match_started", { game_id: body.gameId, white: white.id, black: black.id, white_mode: whiteMode, black_mode: blackMode });
       onStarted(body.gameId);
     } catch {
       setError({ message: "Couldn't reach the server. Check your connection and try again." });
@@ -121,12 +129,17 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
   const rated = isRatedPairing(whiteMode, blackMode);
 
   return (
-    <div className="mx-auto grid w-full max-w-[1400px] gap-4 px-3 py-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)_minmax(0,1fr)]">
+    <div className="mx-auto grid w-full max-w-[1400px] gap-4 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,400px)_minmax(0,1fr)]">
+      <div className="lg:col-span-3">
+        <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">Set up a match</h1>
+        <p className="mt-1 text-sm text-slate-500">Pick a model for White and for Black, then start. Built-in engines need no API key.</p>
+      </div>
       <SideSetup
         color="white"
         models={playable}
         loading={isLoading}
         rosterError={rosterError}
+        onRetry={refetch}
         selected={whiteId}
         onSelect={fresh(setWhiteId)}
         mode={whiteMode}
@@ -135,46 +148,49 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
         keyState={keyState}
       />
 
-      <div className="flex flex-col gap-4 lg:order-none">
+      <div className="order-last flex flex-col gap-4 lg:sticky lg:top-20 lg:order-none lg:self-start">
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="aspect-square w-full">
+          <div className="hidden aspect-square w-full lg:block">
             <Board id="setup-preview" fen={STARTING_FEN} animate={false} />
           </div>
-          <div className="mt-4 space-y-3">
-            <div className="flex items-center justify-between gap-2 text-sm">
+          <div className="space-y-3 lg:mt-4">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 text-sm" aria-live="polite">
               <span className="flex min-w-0 items-center gap-1.5">
                 <SideDot color="white" />
-                <span className="truncate font-medium">{white?.name ?? "White"}</span>
+                <span className={cn("truncate font-medium", !white && "text-slate-400")}>{white?.name ?? "Pick White"}</span>
               </span>
-              <span className="text-slate-400">vs</span>
-              <span className="flex min-w-0 items-center gap-1.5">
-                <span className="truncate font-medium">{black?.name ?? "Black"}</span>
+              <span className="text-xs text-slate-400">vs</span>
+              <span className="flex min-w-0 items-center justify-end gap-1.5">
+                <span className={cn("truncate font-medium", !black && "text-slate-400")}>{black?.name ?? "Pick Black"}</span>
                 <SideDot color="black" />
               </span>
-            </div>
-            <div className="flex items-center justify-center gap-2">
-              <RatedChip rated={rated} />
-              {!rated && <span className="text-[11px] text-slate-500">Use the same mode on both sides for a rated game.</span>}
             </div>
             <button
               onClick={start}
               disabled={!white || !black || starting}
               className={cn(
-                "w-full rounded-xl py-3 text-base font-bold transition",
-                !white || !black || starting ? "cursor-not-allowed bg-slate-200 text-slate-500" : "bg-slate-900 text-white shadow hover:bg-slate-700 active:scale-[0.99]",
+                "w-full rounded-lg py-3 text-base font-semibold transition-colors",
+                !white || !black || starting ? "cursor-not-allowed bg-slate-100 text-slate-400" : "bg-slate-900 text-white hover:bg-slate-700",
               )}
               data-testid="start-match"
             >
-              {starting ? `${white?.name ?? "White"} is choosing the first move…` : "Start match"}
+              {starting ? `${white?.name ?? "White"} is choosing the first move…` : user ? "Start match" : "Sign in to start a match"}
             </button>
+            <p className="flex items-center justify-center gap-2 text-xs text-slate-500">
+              <RatedChip rated={rated} />
+              {rated ? "Counts toward the leaderboard." : "Modes differ, so ratings won't change."}
+            </p>
             {!white || !black ? (
-              <p className="text-center text-xs text-slate-500">
-                Choose a model for each side, or{" "}
-                <button onClick={quickEngines} className="font-medium text-slate-900 underline underline-offset-2" data-testid="quick-engines">
-                  watch two built-in engines
-                </button>{" "}
-                (no API key needed).
-              </p>
+              <div className="border-t border-slate-100 pt-3 text-center">
+                <button
+                  onClick={quickEngines}
+                  className="w-full rounded-lg px-3 py-2 text-sm font-medium text-slate-700 ring-1 ring-slate-200 transition-colors hover:bg-slate-50"
+                  data-testid="quick-engines"
+                >
+                  Or watch two built-in engines
+                </button>
+                <p className="mt-1.5 text-[11px] text-slate-400">Instant demo, no API key needed.</p>
+              </div>
             ) : missing.length > 0 ? (
               <p className="text-center text-xs text-amber-700">
                 Needs your {missing.map((p) => PROVIDER_LABEL[p]).join(" + ")} key —{" "}
@@ -208,6 +224,7 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
         models={playable}
         loading={isLoading}
         rosterError={rosterError}
+        onRetry={refetch}
         selected={blackId}
         onSelect={fresh(setBlackId)}
         mode={blackMode}
@@ -224,6 +241,7 @@ function SideSetup({
   models,
   loading,
   rosterError,
+  onRetry,
   selected,
   onSelect,
   mode,
@@ -235,6 +253,7 @@ function SideSetup({
   models: Model[];
   loading: boolean;
   rosterError: string | null;
+  onRetry: () => void;
   selected: string | null;
   onSelect: (id: string) => void;
   mode: SkillMode;
@@ -252,51 +271,67 @@ function SideSetup({
 
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:max-h-[calc(100vh-7rem)]" data-testid={`setup-${color}`}>
-      <header className={cn("flex items-center gap-2 px-4 py-3", color === "white" ? "bg-slate-50" : "bg-slate-900 text-white")}>
-        <SideDot color={color} className={color === "black" ? "ring-white/70" : undefined} />
-        <h2 className="text-sm font-bold uppercase tracking-wider">{color}</h2>
+      <header className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+        <SideDot color={color} />
+        <h2 className="text-sm font-semibold capitalize text-slate-900">{color}</h2>
       </header>
 
-      <div className="border-b border-slate-100 p-3">
-        <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">Skill mode</label>
-        <div className="grid grid-cols-3 gap-1" role="radiogroup" aria-label={`${color} skill mode`}>
-          {SKILL_MODES.map((m) => (
-            <button
-              key={m.id}
-              role="radio"
-              aria-checked={m.id === mode}
-              onClick={() => onMode(m.id)}
-              className={cn(
-                "rounded-lg px-2 py-1.5 text-xs font-medium transition",
-                m.id === mode ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200",
-              )}
-            >
-              {m.label}
-            </button>
-          ))}
+      <div className="space-y-3 border-b border-slate-100 p-3">
+        <div>
+          <label htmlFor={`mode-${color}`} className="mb-1 block text-xs font-medium text-slate-600">
+            Skill mode
+          </label>
+          <select
+            id={`mode-${color}`}
+            value={mode}
+            onChange={(e) => onMode(e.target.value as SkillMode)}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 hover:border-slate-300"
+            aria-describedby={`mode-${color}-help`}
+          >
+            {SKILL_MODES.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <p id={`mode-${color}-help`} className="mt-1 text-xs text-slate-500">
+            {modeInfo.description}
+          </p>
         </div>
-        <p className="mt-2 text-xs text-slate-500">{modeInfo.description}</p>
-      </div>
-
-      <div className="p-3 pb-0">
         <input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search models…"
-          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm placeholder:text-slate-400 hover:border-slate-300"
           aria-label={`Search ${color} models`}
         />
       </div>
 
-      <div className="min-h-[12rem] flex-1 overflow-y-auto p-3" role="listbox" aria-label={`${color} model`}>
-        {loading && <p className="text-sm text-slate-400">Loading models…</p>}
-        {rosterError && <p className="text-sm text-rose-600">Couldn&apos;t load models: {rosterError}</p>}
-        {!loading && groups.length === 0 && <p className="text-sm text-slate-400">No models match.</p>}
+      <div className="max-h-80 min-h-[12rem] flex-1 overflow-y-auto p-2 lg:max-h-none" role="listbox" aria-label={`${color} model`}>
+        {loading && (
+          <div className="space-y-2 p-1" aria-label="Loading models">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="h-10 animate-pulse rounded-lg bg-slate-100" />
+            ))}
+          </div>
+        )}
+        {!loading && rosterError && (
+          <div className="flex flex-col items-center gap-2 px-3 py-8 text-center" role="alert">
+            <p className="text-sm text-slate-700">Couldn&apos;t load the models.</p>
+            <p className="text-xs text-slate-500">The server may be starting up or offline.</p>
+            <button onClick={onRetry} className="mt-1 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50">
+              Try again
+            </button>
+          </div>
+        )}
+        {!loading && !rosterError && groups.length === 0 && (
+          <p className="px-3 py-8 text-center text-sm text-slate-500">{query ? `No models match “${query.trim()}”.` : "No models available."}</p>
+        )}
         {groups.map((g) => (
-          <div key={g.provider} className="mb-3">
-            <h3 className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{PROVIDER_LABEL[g.provider]}</h3>
-            <ul className="space-y-1">
+          <div key={g.provider} className="mb-2">
+            <h3 className="px-2 pb-1 pt-2 text-[11px] font-medium text-slate-400">{PROVIDER_LABEL[g.provider]}</h3>
+            <ul className="space-y-0.5">
               {g.models.map((m) => {
                 const state = keyState(providerOf(m.id));
                 const isSelected = m.id === selected;
@@ -309,19 +344,20 @@ function SideSetup({
                       disabled={isTaken}
                       onClick={() => onSelect(m.id)}
                       className={cn(
-                        "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition",
-                        isSelected ? "bg-slate-900 text-white" : "hover:bg-slate-100",
-                        isTaken && "cursor-not-allowed opacity-40",
+                        "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left ring-inset transition-colors",
+                        isSelected ? "bg-slate-50 ring-2 ring-slate-900" : "hover:bg-slate-50",
+                        isTaken && "cursor-not-allowed opacity-40 hover:bg-transparent",
                       )}
+                      title={isTaken ? "Already playing the other side" : undefined}
                       data-testid={`pick-${color}-${m.id}`}
                     >
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">{m.name}</span>
-                        <span className={cn("block text-[11px] tabular-nums", isSelected ? "text-slate-300" : "text-slate-500")}>
+                        <span className="block truncate text-sm font-medium text-slate-900">{m.name}</span>
+                        <span className="block text-[11px] tabular-nums text-slate-500">
                           {m.elo} ELO · {m.wins}W {m.losses}L {m.draws}D
                         </span>
                       </span>
-                      <KeyBadge state={state} inverted={isSelected} />
+                      <KeyBadge state={state} />
                     </button>
                   </li>
                 );
@@ -330,20 +366,15 @@ function SideSetup({
           </div>
         ))}
       </div>
-      {selected && (
-        <footer className="border-t border-slate-100 px-4 py-2">
-          <ProviderChip modelId={selected} />
-        </footer>
-      )}
     </section>
   );
 }
 
-function KeyBadge({ state, inverted }: { state: KeyState; inverted: boolean }) {
-  if (state === "built-in") return <span className={cn("text-[10px] font-medium", inverted ? "text-slate-300" : "text-slate-400")}>no key</span>;
-  if (state === "missing") return <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">needs key</span>;
+function KeyBadge({ state }: { state: KeyState }) {
+  if (state === "built-in") return <span className="text-[11px] text-slate-400">no key</span>;
+  if (state === "missing") return <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-inset ring-amber-200">needs key</span>;
   return (
-    <span className={cn("text-[10px] font-medium", inverted ? "text-emerald-300" : "text-emerald-600")} title={state === "server" ? "Using the server's key" : "Using your key"}>
+    <span className="text-[11px] font-medium text-emerald-700" title={state === "server" ? "Using the server's key" : "Using your key"}>
       key ✓
     </span>
   );

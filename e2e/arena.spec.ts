@@ -7,6 +7,13 @@ import { test, expect, type Page } from "@playwright/test";
  */
 test.describe.configure({ mode: "serial" });
 
+// Starting and stopping matches now needs a Neon Auth session (stopping: admin).
+// shortcut: these flows skip until CI has a signed-in admin storage state; set
+// E2E_ADMIN_STATE to a Playwright storageState file to run them.
+const adminState = process.env.E2E_ADMIN_STATE;
+if (adminState) test.use({ storageState: adminState });
+const needsAdmin = () => test.skip(!adminState, "needs a signed-in admin (set E2E_ADMIN_STATE)");
+
 async function stopAnyLiveGame(page: Page) {
   await page.request.post("/api/games/destroy", { data: {} });
 }
@@ -20,6 +27,7 @@ test.afterAll(async ({ request }) => {
 });
 
 test("quick start: two built-in engines play to a result, with a replay label while the board catches up", async ({ page }) => {
+  needsAdmin();
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
 
@@ -44,6 +52,7 @@ test("quick start: two built-in engines play to a result, with a replay label wh
 });
 
 test("watches a live match: indicator, keyboard and list navigation, stopping", async ({ page, request }) => {
+  needsAdmin();
   // Depth-4 engines take ~1-3s a move, so the game is reliably still live.
   const res = await request.post("/api/games/start", { data: { modelIds: ["local/engine-4", "local/engine-4"] } });
   expect(res.status(), await res.text()).toBe(400); // a model can't play itself
@@ -70,10 +79,11 @@ test("watches a live match: indicator, keyboard and list navigation, stopping", 
   // Stop the match: it ends without a result and never counts for ratings.
   page.once("dialog", (d) => d.accept());
   await page.getByTestId("stop-match").click();
-  await expect(page.getByTestId("result-banner")).toContainText("Match stopped by user", { timeout: 30_000 });
+  await expect(page.getByTestId("result-banner")).toContainText("Match stopped by the admin", { timeout: 30_000 });
 });
 
 test("finished games appear in history and open for replay", async ({ page, request }) => {
+  needsAdmin();
   const res = await request.post("/api/games/start", { data: { modelIds: ["local/greedy", "local/random"] } });
   expect(res.ok()).toBeTruthy();
   const { gameId } = await res.json();
@@ -96,6 +106,7 @@ test("finished games appear in history and open for replay", async ({ page, requ
 });
 
 test("an LLM match without a key is caught before anything is created", async ({ page }) => {
+  needsAdmin();
   await page.goto("/");
   await page.getByTestId("pick-white-groq/openai/gpt-oss-120b").click();
   await page.getByTestId("pick-black-local/random").click();

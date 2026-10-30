@@ -16,6 +16,7 @@ import { MoveList } from "./move-list";
 import { SidePanel } from "./side-panel";
 import { RatedChip, SideDot } from "./badges";
 import { ThinkingDots } from "./thinking";
+import { useSessionUser } from "./user-menu";
 
 const PIECE_GLYPH: Record<string, string> = { q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
 
@@ -96,8 +97,9 @@ export function GameView({ gameId, onNewGame, onGone }: GameViewProps) {
   if (error === "not-found") {
     return (
       <Centered>
-        <p className="text-slate-600">This game doesn&apos;t exist (it may have been cancelled before its first move).</p>
-        <Link href="/" className="mt-3 inline-block rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">
+        <h1 className="text-lg font-semibold text-slate-900">Game not found</h1>
+        <p className="mt-1 max-w-sm text-sm text-slate-500">It may have been cancelled before its first move.</p>
+        <Link href="/" className="mt-4 inline-block rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
           Start a match
         </Link>
       </Centered>
@@ -106,7 +108,9 @@ export function GameView({ gameId, onNewGame, onGone }: GameViewProps) {
   if (loading || !data || !game) {
     return (
       <Centered>
-        <p className="text-slate-500">{error === "network" ? "Can't reach the server — retrying…" : "Loading game…"}</p>
+        <p className="text-sm text-slate-500" role="status">
+          {error === "network" ? "Can't reach the server. Retrying…" : "Loading game…"}
+        </p>
       </Centered>
     );
   }
@@ -265,7 +269,8 @@ function Controls({
   onGo: (n: number) => void;
   onFlip: () => void;
 }) {
-  const btn = "rounded-lg px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent";
+  const btn =
+    "inline-flex h-9 min-w-9 items-center justify-center rounded-lg px-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:opacity-30 disabled:hover:bg-transparent";
   return (
     <div className="flex items-center gap-1" role="toolbar" aria-label="Move navigation">
       <button className={btn} onClick={() => onGo(0)} disabled={shown === 0} aria-label="First move" title="First (Home)">
@@ -331,6 +336,7 @@ function StatusStrip({
 }) {
   const [stopping, setStopping] = useState(false);
   const [copied, setCopied] = useState(false);
+  const { isAdmin } = useSessionUser();
   const started = new Date(startedAt).getTime();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -371,13 +377,7 @@ function StatusStrip({
   }
 
   return (
-    <div
-      className={cn(
-        "flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border px-4 py-3 shadow-sm",
-        live ? "border-slate-200 bg-white" : "border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50",
-      )}
-      data-testid="status-strip"
-    >
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm" data-testid="status-strip">
       {live && stoppable ? (
         <span className="inline-flex items-center gap-2 text-sm font-semibold text-rose-600" data-testid="live-badge">
           <span className="relative flex h-2.5 w-2.5">
@@ -399,7 +399,7 @@ function StatusStrip({
         </span>
       ) : (
         <div className="min-w-0" data-testid="result-banner">
-          <p className="text-lg font-bold text-slate-900">
+          <p className="text-lg font-semibold text-slate-900">
             {resultHeadline(result, white.name, black.name)} <span className="ml-1 font-mono text-sm font-semibold text-slate-500">{result ?? ""}</span>
           </p>
           {reason && <p className="text-sm text-slate-600">{reason}</p>}
@@ -418,10 +418,10 @@ function StatusStrip({
         </span>
       )}
       <span className="ml-auto flex items-center gap-2">
-        <button onClick={copyPgn} className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50">
+        <button onClick={copyPgn} className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50" aria-live="polite">
           {copied ? "Copied!" : "Copy PGN"}
         </button>
-        {stoppable && (
+        {stoppable && isAdmin && (
           <button
             onClick={stop}
             disabled={stopping}

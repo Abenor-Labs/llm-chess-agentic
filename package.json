@@ -18,19 +18,22 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "simulate": "tsx scripts/simulate-match.ts",
-    "healthcheck": "tsx scripts/model-healthcheck.ts"
+    "healthcheck": "tsx scripts/model-healthcheck.ts",
+    "admin:grant": "tsx scripts/grant-admin.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.109",
     "@ai-sdk/google": "^2.0.102",
     "@ai-sdk/groq": "2.0.57",
     "@ai-sdk/openai": "^2.0.133",
+    "@neon/auth": "0.8.0",
     "ai": "^5.0.273",
     "chess.js": "^1.4.0",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.44.7",
     "next": "16.2.10",
     "postgres": "^3.4.7",
+    "posthog-js": "1.438.10",
     "react": "19.2.0",
     "react-chessboard": "^5.8.6",
     "react-dom": "19.2.0",

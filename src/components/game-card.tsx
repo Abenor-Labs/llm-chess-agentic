@@ -16,14 +16,14 @@ export function GameCard({ game }: { game: GameListItem }) {
   return (
     <Link
       href={`/game/${game.id}`}
-      className="group flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+      className="group flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-shadow hover:border-slate-300 hover:shadow-md"
       data-testid="game-card"
     >
       <div className="pointer-events-none aspect-square w-full bg-slate-100 p-2">
         <Board id={`card-${game.id}`} fen={game.fen} animate={false} />
       </div>
       <div className="space-y-2 p-3">
-        <p className={cn("text-sm font-bold", tone)}>
+        <p className={cn("text-sm font-semibold", tone)}>
           {resultHeadline(game.result, white, black)} <span className="font-mono text-xs font-semibold text-slate-400">{game.result ?? ""}</span>
         </p>
         <div className="space-y-1 text-xs">

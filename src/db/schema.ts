@@ -42,9 +42,12 @@ export const games = pgTable("games", {
   geminiApiKey: text("gemini_api_key"),
   anthropicApiKey: text("anthropic_api_key"),
   openaiApiKey: text("openai_api_key"),
+  subqApiKey: text("subq_api_key"),
   // Why the game is waiting, e.g. "Black: rate limited by Groq — retrying".
   // Cleared by the next successful move.
   statusNote: text("status_note"),
+  // neon_auth."user".id of whoever started the match (null for pre-auth games).
+  startedBy: text("started_by"),
   // Serverless-safe processing claim: a game is claimed atomically before a tick
   // processes it, preventing overlapping ticks / instances from double-moving.
   processing: boolean("processing").notNull().default(false),

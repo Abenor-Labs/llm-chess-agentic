@@ -16,7 +16,7 @@ export const StartGameRequestSchema = z
     whiteMode: SkillModeSchema.optional(),
     blackMode: SkillModeSchema.optional(),
     keys: z
-      .object({ groq: Key, google: Key, anthropic: Key, openai: Key })
+      .object({ groq: Key, google: Key, anthropic: Key, openai: Key, subq: Key })
       .partial()
       .optional(),
     /** Legacy field names, still accepted. */
@@ -32,7 +32,7 @@ export type StartGameRequest = z.infer<typeof StartGameRequestSchema>;
 /** Game columns safe for clients, plus derived fields. */
 export type PublicGame = Omit<
   Game,
-  "groqApiKey" | "geminiApiKey" | "anthropicApiKey" | "openaiApiKey" | "processing" | "processingStartedAt"
+  "groqApiKey" | "geminiApiKey" | "anthropicApiKey" | "openaiApiKey" | "subqApiKey" | "processing" | "processingStartedAt"
 > & { rated: boolean };
 
 export interface GameDetailResponse {

@@ -11,6 +11,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* One visible keyboard focus style everywhere; mouse clicks don't show it. */
+:focus-visible {
+  outline: 2px solid #0f172a;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
 /* Respect users who prefer less motion: no bouncing dots or pings. */
 @media (prefers-reduced-motion: reduce) {
   *,

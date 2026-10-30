@@ -25,7 +25,7 @@ export function MoveList({ moves, shown, onSelectPly }: { moves: Move[]; shown: 
     else if (top + el.offsetHeight > box.scrollTop + box.clientHeight) box.scrollTop = top + el.offsetHeight - box.clientHeight + 8;
   }, [shown]);
 
-  if (moves.length === 0) return <p className="px-1 text-sm italic text-slate-400">The game hasn&apos;t started yet.</p>;
+  if (moves.length === 0) return <p className="px-1 py-2 text-sm text-slate-400">No moves yet. White is up first.</p>;
 
   const pairs: Array<[Move, Move | undefined, number]> = [];
   for (let i = 0; i < moves.length; i += 2) pairs.push([moves[i], moves[i + 1], i]);
@@ -40,7 +40,7 @@ export function MoveList({ moves, shown, onSelectPly }: { moves: Move[]; shown: 
         ref={isCurrent ? active : undefined}
         onClick={() => onSelectPly(ply)}
         className={cn(
-          "flex items-center gap-1 rounded px-1.5 py-0.5 text-left font-mono text-sm transition-colors",
+          "flex items-center gap-1 justify-self-start rounded px-1.5 py-0.5 text-left font-mono text-sm transition-colors",
           isCurrent ? "bg-slate-900 text-white" : "text-slate-800 hover:bg-slate-100",
           ply > shown && "text-slate-400",
         )}

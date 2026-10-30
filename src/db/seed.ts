@@ -41,6 +41,11 @@ export const ROSTER: Array<{ id: string; name: string; provider: string }> = [
   { id: "openai/gpt-6-astra", name: "GPT-6 Astra", provider: "openai" },
   { id: "openai/gpt-6.1-sol", name: "GPT-6.1 Sol", provider: "openai" },
   { id: "openai/gpt-6-luna", name: "GPT-6 Luna", provider: "openai" },
+
+  // SubQ
+  { id: "subq/subq-preview", name: "SubQ Preview", provider: "subq" },
+  { id: "subq/subq-snap-1.1", name: "SubQ Snap 1.1", provider: "subq" },
+  { id: "subq/subq-snap-preview", name: "SubQ Snap Preview", provider: "subq" },
 ];
 
 type Db = ReturnType<typeof drizzle>;

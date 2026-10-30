@@ -23,6 +23,7 @@ const ENV_KEY: Record<KeyedProvider, string> = {
   google: "GEMINI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
+  subq: "SUBQ_API_KEY",
 };
 
 /** The id the provider's own API expects (prefix stripped; gateway ids pass through). */
@@ -42,6 +43,8 @@ export function timeoutFor(provider: ProviderId, effort: Effort): number {
   const base = AI_TIMEOUTS.BASE_MS[provider];
   return Math.min(AI_TIMEOUTS.MAX_MS, Math.round(base * AI_TIMEOUTS.EFFORT_MULTIPLIER[effort]));
 }
+
+export const SUBQ_BASE_URL = "https://api.subq.ai/v1";
 
 type ProviderOptions = Record<string, Record<string, unknown>>;
 
@@ -108,6 +111,14 @@ export function effortOptions(modelId: string, effort: Effort): ProviderOptions 
     return { openai: { reasoningEffort: effort === "high" ? "high" : effort === "medium" ? "medium" : "low" } };
   }
 
+  if (provider === "subq") {
+    // Snap answers through the Decisions API, which has no effort knob.
+    if (name.startsWith("subq-snap")) return undefined;
+    // SubQ plays strong chess: give it one effort step above the mode's.
+    const subq = { minimal: "low", low: "medium", medium: "high", high: "max" } as const;
+    return { openai: { reasoningEffort: subq[effort] } };
+  }
+
   return undefined;
 }
 
@@ -155,12 +166,22 @@ export function planCall(
         : provider === "google"
           ? createGoogleGenerativeAI({ apiKey })(name)
           : provider === "anthropic"
-            ? createAnthropic({ apiKey })(name)
-            : createOpenAI({ apiKey })(name);
+            ? // Pinned: an inherited ANTHROPIC_BASE_URL (Anthropic-SDK style, no /v1) would 404 every call.
+              createAnthropic({ apiKey, baseURL: "https://api.anthropic.com/v1" })(name)
+            : provider === "subq"
+              ? // OpenAI-compatible Chat Completions (SubQ has no Responses parity guarantee).
+                createOpenAI({ apiKey, baseURL: SUBQ_BASE_URL }).chat(name)
+              : createOpenAI({ apiKey })(name);
   }
 
-  // Adaptive Claude thinks inside max_tokens, so leave it room to think.
-  const thinkingRoom = provider === "anthropic" && isAdaptiveClaude(name) ? OUTPUT_TOKENS[opts.effort] : budget;
+  // Adaptive Claude and SubQ reason inside max_tokens, so leave them room to think
+  // (SubQ returns empty content when reasoning exhausts the budget).
+  const thinkingRoom =
+    provider === "subq"
+      ? 2 * OUTPUT_TOKENS[opts.effort]
+      : provider === "anthropic" && isAdaptiveClaude(name)
+        ? OUTPUT_TOKENS[opts.effort]
+        : budget;
 
   return {
     provider,

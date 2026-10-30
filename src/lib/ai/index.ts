@@ -1,4 +1,5 @@
 import { generateText, APICallError } from "ai";
+import { Chess } from "chess.js";
 import { modeConfig } from "../modes";
 import {
   APIKeyError,
@@ -9,7 +10,7 @@ import {
   ProviderError,
   ChessError,
 } from "../errors";
-import { planCall, providerOf, PROVIDER_LABEL, type ApiKeys, type CallPlan } from "./providers";
+import { planCall, providerOf, providerModelName, resolveKey, PROVIDER_LABEL, SUBQ_BASE_URL, type ApiKeys, type CallPlan } from "./providers";
 import { parseAIResponse } from "./parse";
 import { buildPrompt, type PromptContext } from "./prompt";
 
@@ -51,7 +52,10 @@ export function classifyError(err: unknown, modelId: string, timeoutMs: number):
   const body = APICallError.isInstance(err) ? (err.responseBody ?? "") : "";
   const text = `${message} ${body}`.toLowerCase();
 
-  if (status === 401 || status === 403 || /invalid api key|incorrect api key|api key not valid|unauthori[sz]ed|permission denied/.test(text)) {
+  // A valid key without access to this model (e.g. SubQ early-access models).
+  if (/model_not_allowed|not permitted for this api key/.test(text)) return new ModelUnavailableError(modelId, message.slice(0, 200));
+  // 402 = out of credits (SubQ): fatal like a bad key, retrying can't help.
+  if (status === 401 || status === 402 || status === 403 || /invalid api key|incorrect api key|api key not valid|unauthori[sz]ed|permission denied/.test(text)) {
     return new APIKeyError(provider, status);
   }
   if (status === 429 || /rate limit|quota|too many requests|resource.?exhausted/.test(text)) {
@@ -88,6 +92,63 @@ async function generate(plan: CallPlan, prompt: string, signal: AbortSignal, wit
 }
 
 /**
+ * SubQ Snap is a decision model: instead of writing a move it picks one option
+ * from a list, so it is offered every legal move (keys UCI, descriptions SAN).
+ */
+async function decideMove(name: string, apiKey: string, ctx: PromptContext, signal: AbortSignal): Promise<Omit<MoveReply, "latencyMs">> {
+  const legal = new Chess(ctx.fen).moves({ verbose: true });
+  if (legal.length === 1) {
+    return { move: legal[0].san, reasoning: "The only legal move.", plan: null, raw: "" };
+  }
+  const criteria = Object.fromEntries(legal.map((m) => [m.lan, m.san]));
+  const url = `${SUBQ_BASE_URL}/systemone`;
+  const requestBody = {
+    model: name,
+    state: buildPrompt(ctx),
+    questions: {
+      move: { type: "choice", instructions: `Choose the strongest move for ${ctx.color}. Calculate concrete variations.`, criteria },
+    },
+  };
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(requestBody),
+    signal,
+  });
+  const raw = await res.text();
+  if (!res.ok) {
+    throw new APICallError({
+      message: `SubQ ${res.status}: ${raw.slice(0, 200)}`,
+      url,
+      requestBodyValues: requestBody,
+      statusCode: res.status,
+      responseHeaders: Object.fromEntries(res.headers),
+      responseBody: raw,
+    });
+  }
+  let answer: { choice?: string; confidence?: number; probabilities?: Record<string, number> } | undefined;
+  try {
+    answer = JSON.parse(raw)?.answers?.move;
+  } catch {
+    throw new ParseError(raw);
+  }
+  const san = answer?.choice ? criteria[answer.choice] : undefined;
+  if (!san) throw new ParseError(raw);
+  const top = Object.entries(answer?.probabilities ?? {})
+    .filter(([uci]) => criteria[uci])
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([uci, p]) => `${criteria[uci]} ${Math.round(p * 100)}%`);
+  const confidence = typeof answer?.confidence === "number" ? ` with ${Math.round(answer.confidence * 100)}% confidence` : "";
+  return {
+    move: san,
+    reasoning: `Chose ${san}${confidence}${top.length ? ` (top options: ${top.join(", ")})` : ""}.`,
+    plan: null,
+    raw,
+  };
+}
+
+/**
  * One model call: prompt in, raw answer parsed into a move proposal out.
  * Throws typed errors; never invents a move.
  */
@@ -104,6 +165,15 @@ export async function requestMove(
 
   const timeout = AbortSignal.timeout(Math.max(1, timeoutMs));
   const signal = opts.signal ? AbortSignal.any([timeout, opts.signal]) : timeout;
+
+  if (plan.provider === "subq" && providerModelName(modelId).startsWith("subq-snap")) {
+    try {
+      const reply = await decideMove(providerModelName(modelId), resolveKey("subq", opts.keys)!, ctx, signal);
+      return { ...reply, latencyMs: Date.now() - started };
+    } catch (err) {
+      throw classifyError(signal.aborted ? Object.assign(new Error("aborted"), { name: "AbortError" }) : err, modelId, timeoutMs);
+    }
+  }
 
   let raw: string;
   try {
