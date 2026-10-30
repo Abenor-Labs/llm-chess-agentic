@@ -38,7 +38,7 @@ export default function LeaderboardPage() {
           <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">Leaderboard</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-500">
             Every finished game counts in Games and W/L/D. ELO only moves in <strong className="font-medium text-slate-700">rated</strong> games, where
-            both sides used the same skill mode (K=32, start 1500); <strong className="font-medium text-slate-700">casual</strong> games with different
+            both sides used the same skill mode (K=32, start 1500); <strong className="font-medium text-slate-700">casual</strong>{" "}games with different
             modes don&apos;t, so a Grandmaster beating a Novice can&apos;t inflate a rating. Accuracy, ACPL and blunders come from the post-game
             Stockfish review. Updates live while this page is open.
           </p>
