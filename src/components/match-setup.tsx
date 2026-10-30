@@ -178,7 +178,7 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
             </button>
             <p className="flex items-center justify-center gap-2 text-xs text-slate-500">
               <RatedChip rated={rated} />
-              {rated ? "Counts toward the leaderboard." : "Modes differ, so ratings won't change."}
+              {rated ? "Same skill mode: the result moves ELO." : "Different skill modes: counts in W/L/D, ELO stays put."}
             </p>
             {!white || !black ? (
               <div className="border-t border-slate-100 pt-3 text-center">

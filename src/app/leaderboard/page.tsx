@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useLeaderboard } from "@/contexts/leaderboard-context";
+import { usePageVisibility } from "@/hooks/use-page-visibility";
+import { POLLING_INTERVALS } from "@/lib/config";
 import { ProviderChip } from "@/components/badges";
 import { cn } from "@/lib/utils";
 import type { AccuracyStat } from "@/types/api";
@@ -11,13 +13,21 @@ export default function LeaderboardPage() {
   const [accuracy, setAccuracy] = useState<Record<string, AccuracyStat>>({});
   const [showAll, setShowAll] = useState(false);
 
+  const visible = usePageVisibility();
   useEffect(() => {
-    void refetch();
-    fetch("/api/analytics/accuracy", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : { models: [] }))
-      .then((d: { models?: AccuracyStat[] }) => setAccuracy(Object.fromEntries((d.models ?? []).map((m) => [m.modelId, m]))))
-      .catch(() => {});
-  }, [refetch]);
+    if (!visible) return;
+    const load = () => {
+      void refetch();
+      fetch("/api/analytics/accuracy", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : { models: [] }))
+        .then((d: { models?: AccuracyStat[] }) => setAccuracy(Object.fromEntries((d.models ?? []).map((m) => [m.modelId, m]))))
+        .catch(() => {});
+    };
+    load();
+    // Live while the tab is visible: finished games show up without a manual refresh.
+    const t = setInterval(load, POLLING_INTERVALS.GAMES_LIST_REFRESH_MS);
+    return () => clearInterval(t);
+  }, [refetch, visible]);
 
   const rows = useMemo(() => models.filter((m) => showAll || m.gamesPlayed > 0), [models, showAll]);
 
@@ -27,8 +37,10 @@ export default function LeaderboardPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">Leaderboard</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-500">
-            ELO from rated games (both sides on the same skill mode; K=32, start 1500). Accuracy, ACPL and blunders come from the
-            post-game Stockfish review. Built-in engines anchor the pool.
+            Every finished game counts in Games and W/L/D. ELO only moves in <strong className="font-medium text-slate-700">rated</strong> games, where
+            both sides used the same skill mode (K=32, start 1500); <strong className="font-medium text-slate-700">casual</strong> games with different
+            modes don&apos;t, so a Grandmaster beating a Novice can&apos;t inflate a rating. Accuracy, ACPL and blunders come from the post-game
+            Stockfish review. Updates live while this page is open.
           </p>
         </div>
         <div className="flex items-center gap-3">

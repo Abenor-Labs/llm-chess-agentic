@@ -246,7 +246,10 @@ export async function abortGame(gameId: string): Promise<void> {
  * Ends a game exactly once. The status flip and the rating update share a
  * transaction, and the flip is conditional on the game still being active, so
  * two concurrent enders can never double-count. `result` null = no result
- * (cancelled / stopped): nothing is rated.
+ * (cancelled / stopped): nothing is counted. Every decided game counts toward
+ * games and W/L/D; ELO moves only for rated games (both sides on the same skill
+ * mode), so a Grandmaster beating a Novice can't inflate a rating. Self-play
+ * (same model both sides) changes nothing.
  */
 export async function endGame(gameId: string, result: GameResult | null, reason: string): Promise<boolean> {
   return db.transaction(async (tx) => {
@@ -256,7 +259,8 @@ export async function endGame(gameId: string, result: GameResult | null, reason:
       .where(and(eq(games.id, gameId), eq(games.status, "active")))
       .returning();
     if (!ended) return false;
-    if (!result || ended.whiteId === ended.blackId || !isRatedPairing(ended.whiteMode, ended.blackMode)) return true;
+    if (!result || ended.whiteId === ended.blackId) return true;
+    const rated = isRatedPairing(ended.whiteMode, ended.blackMode);
 
     // Lock both rating rows in a fixed order to avoid deadlocks.
     const ids = [ended.whiteId, ended.blackId].sort();
@@ -272,7 +276,7 @@ export async function endGame(gameId: string, result: GameResult | null, reason:
 
     for (const [me, opp, isWhite] of [[white, black, true], [black, white, false]] as const) {
       const outcome = outcomeFromResult(result, isWhite);
-      const { newRating } = calculateNewElo(me.elo, opp.elo, outcome);
+      const newRating = rated ? calculateNewElo(me.elo, opp.elo, outcome).newRating : me.elo;
       await tx
         .update(models)
         .set({

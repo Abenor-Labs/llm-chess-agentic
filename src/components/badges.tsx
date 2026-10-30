@@ -24,12 +24,12 @@ export function ModeChip({ mode, className }: { mode: string; className?: string
 
 export function RatedChip({ rated }: { rated: boolean }) {
   return rated ? (
-    <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800 ring-1 ring-inset ring-emerald-200" title="Both sides played the same mode, so this game counts toward ratings">
+    <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800 ring-1 ring-inset ring-emerald-200" title="Rated: both sides played the same skill mode, so the result moves ELO">
       Rated
     </span>
   ) : (
-    <span className="inline-flex items-center rounded-full bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-500 ring-1 ring-inset ring-slate-200" title="Sides played different modes, so ratings are unaffected">
-      Unrated
+    <span className="inline-flex items-center rounded-full bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-500 ring-1 ring-inset ring-slate-200" title="Casual: the sides played different skill modes, so it counts in W/L/D but doesn't move ELO">
+      Casual
     </span>
   );
 }

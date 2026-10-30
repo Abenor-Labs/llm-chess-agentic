@@ -25,7 +25,7 @@ export function LeaderboardProvider({ children }: { children: ReactNode }) {
   const fetchLeaderboard = useCallback(async (showRefetching = false) => {
     if (showRefetching) setIsRefetching(true);
     try {
-      const res = await fetch("/api/leaderboard");
+      const res = await fetch("/api/leaderboard", { cache: "no-store" });
       if (!res.ok) {
         setError("Failed to load leaderboard");
         return;

@@ -341,14 +341,16 @@ describe.skipIf(!hasDb)("endGame (real database)", () => {
     expect(w.elo + b.elo).toBe(3000);
   });
 
-  it("does not rate mismatched modes or null results", async () => {
-    const unrated = await createGame({ whiteId: "local/engine-2", blackId: "local/random", whiteMode: "grandmaster", blackMode: "novice" });
-    await endGame(unrated.id, "1-0", "Checkmate");
+  it("counts casual (mismatched-mode) games in W/L/D without moving ELO; ignores null results", async () => {
+    const casual = await createGame({ whiteId: "local/engine-2", blackId: "local/random", whiteMode: "grandmaster", blackMode: "novice" });
+    await endGame(casual.id, "1-0", "Checkmate");
     const noResult = await createGame({ whiteId: "local/engine-2", blackId: "local/random" });
-    await endGame(noResult.id, null, "Match stopped by user");
-    const rows = await db.select().from(models);
-    expect(rows.every((m) => m.elo === 1500 && m.gamesPlayed === 0)).toBe(true);
-    expect(await getGame(unrated.id)).toMatchObject({ status: "complete", result: "1-0" });
+    await endGame(noResult.id, null, "Match stopped by the admin");
+    const w = await getModel("local/engine-2");
+    const b = await getModel("local/random");
+    expect(w).toMatchObject({ elo: 1500, gamesPlayed: 1, wins: 1, losses: 0 });
+    expect(b).toMatchObject({ elo: 1500, gamesPlayed: 1, wins: 0, losses: 1 });
+    expect(await getGame(casual.id)).toMatchObject({ status: "complete", result: "1-0" });
   });
 
   it("abortGame removes the game and its moves", async () => {
