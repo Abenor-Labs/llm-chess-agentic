@@ -243,7 +243,7 @@ function PlayerBar({
       data-testid={`player-bar-${color}`}
     >
       <SideDot color={color} className="h-3.5 w-3.5" />
-      <span className="min-w-0">
+      <span className="min-w-0 flex-1">
         <span className="block truncate font-semibold leading-tight text-slate-900">{model.name}</span>
         <span className="block text-[11px] leading-tight text-slate-500">
           {color === "white" ? "White" : "Black"} · {modeConfig(mode).label}
@@ -261,7 +261,7 @@ function PlayerBar({
         </span>
       )}
       <span className="ml-auto flex shrink-0 items-center gap-1 text-slate-500">
-        <span className="text-base leading-none tracking-tighter" aria-label={`captured: ${captured.join(" ")}`}>
+        <span className="hidden text-base leading-none tracking-tighter sm:inline" aria-label={`captured: ${captured.join(" ")}`}>
           {captured.map((p, i) => (
             <span key={i}>{PIECE_GLYPH[p]}</span>
           ))}
