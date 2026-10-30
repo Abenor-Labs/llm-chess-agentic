@@ -36,7 +36,8 @@ describe("StartGameRequestSchema", () => {
   it("explains self-play", () => {
     const r = StartGameRequestSchema.safeParse({ modelIds: ["a", "a"] });
     expect(r.success).toBe(false);
-    if (!r.success) expect(r.error.issues[0].message).toMatch(/cannot play against itself/);
+    if (!r.success) expect(r.error.issues[0].message).toMatch(/different skill mode/);
+    expect(StartGameRequestSchema.safeParse({ modelIds: ["a", "a"], whiteMode: "grandmaster", blackMode: "novice" }).success).toBe(true);
   });
 });
 

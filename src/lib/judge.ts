@@ -100,7 +100,7 @@ export async function judgeMove(input: JudgeInput): Promise<Verdict> {
       lastError = err;
       if (err instanceof ParseError) {
         events.push({ type: "parse", attempt });
-        feedback = `Your answer could not be read. Reply with ONLY the JSON object, e.g. {"reasoning": "...", "plan": "...", "move": "${chess.moves()[0]}"}.`;
+        feedback = `Your answer could not be read. Reply with ONLY the JSON object, e.g. {"comment": "...", "plan": "...", "move": "${chess.moves()[0]}"}.`;
       } else {
         const detail = err instanceof TimeoutError ? "timed out" : err instanceof Error ? err.message.slice(0, 160) : String(err);
         events.push({ type: "error", attempt, detail });

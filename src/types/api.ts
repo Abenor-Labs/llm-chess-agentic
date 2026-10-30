@@ -23,8 +23,9 @@ export const StartGameRequestSchema = z
     groqApiKey: Key,
     geminiApiKey: Key,
   })
-  .refine((data) => data.modelIds[0] !== data.modelIds[1], {
-    message: "A model cannot play against itself; pick two different models",
+  // A model may play itself, but only at different skill modes (such games are never rated).
+  .refine((data) => data.modelIds[0] !== data.modelIds[1] || (data.whiteMode ?? "scholar") !== (data.blackMode ?? "scholar"), {
+    message: "To pit a model against itself, give each side a different skill mode",
     path: ["modelIds"],
   });
 export type StartGameRequest = z.infer<typeof StartGameRequestSchema>;

@@ -21,6 +21,7 @@ const AFTER_E4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
 describe("parseAIResponse", () => {
   it.each([
     ['{"move": "e4", "reasoning": "Center"}', "e4", "Center"],
+    ['{"comment": "Takes the centre", "plan": "d4", "move": "e4"}', "e4", "Takes the centre"],
     ['{"reasoning": "Develop first", "plan": "castle", "move": "Nf3"}', "Nf3", "Develop first"],
     ['```json\n{"move": "c5", "reasoning": "Sicilian"}\n```', "c5", "Sicilian"],
     ['Here is my move: {"move": "d4", "reasoning": "Space"} Good luck!', "d4", "Space"],

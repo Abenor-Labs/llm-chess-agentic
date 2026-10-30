@@ -88,6 +88,10 @@ async function generate(plan: CallPlan, prompt: string, signal: AbortSignal, wit
     maxRetries: 0,
     abortSignal: signal,
   });
+  // Anthropic refusals arrive as an empty "content-filter" finish; say so instead of a blank parse error.
+  if (!result.text.trim() && result.finishReason === "content-filter") {
+    throw new ProviderError(PROVIDER_LABEL[plan.provider], "the model refused this request (safety filter)");
+  }
   return result.text;
 }
 

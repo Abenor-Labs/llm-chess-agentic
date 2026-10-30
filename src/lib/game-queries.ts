@@ -19,7 +19,8 @@ export async function listGames(status: GameStatus, limit: number): Promise<Game
     .select(publicGameColumns)
     .from(games)
     .where(eq(games.status, status))
-    .orderBy(desc(status === "complete" ? games.endedAt : games.startedAt), desc(games.startedAt))
+    // Legacy rows can lack ended_at; Postgres sorts NULLs first under DESC, so fall back to started_at.
+    .orderBy(sql`coalesce(${status === "complete" ? games.endedAt : games.startedAt}, ${games.startedAt}) desc`, desc(games.startedAt))
     .limit(limit);
   if (rows.length === 0) return [];
 

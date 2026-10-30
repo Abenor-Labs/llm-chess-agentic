@@ -9,6 +9,8 @@ const nextConfig: NextConfig = {
     ];
   },
   skipTrailingSlashRedirect: true,
+  // A lockfile in a parent folder (e.g. ~/package-lock.json) otherwise makes Turbopack pick the wrong root in dev.
+  turbopack: { root: __dirname },
 };
 
 export default nextConfig;

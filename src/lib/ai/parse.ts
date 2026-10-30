@@ -72,7 +72,7 @@ function fromObject(obj: unknown): ParsedReply | null {
   const move = asString(o.move) ?? asString(o.Move) ?? asString(o.san) ?? asString(o.best_move) ?? asString(o.bestMove);
   if (!move || move.length > 20) return null;
   const reasoning =
-    asString(o.reasoning) ?? asString(o.reason) ?? asString(o.thought) ?? asString(o.analysis) ?? asString(o.explanation);
+    asString(o.comment) ?? asString(o.reasoning) ?? asString(o.reason) ?? asString(o.thought) ?? asString(o.analysis) ?? asString(o.explanation);
   const plan = asString(o.plan);
   return {
     move,
@@ -110,7 +110,7 @@ export function parseAIResponse(raw: string | null | undefined): ParsedReply | n
   for (const pattern of PROSE_PATTERNS) {
     const m = text.match(pattern);
     if (m?.[1]) {
-      const reasoning = text.match(/"reasoning"\s*:\s*"([^"]+)"/i)?.[1] ?? text;
+      const reasoning = text.match(/"(?:comment|reasoning)"\s*:\s*"([^"]+)"/i)?.[1] ?? text;
       return { move: m[1].trim(), reasoning: clip(reasoning, MAX_REASONING_CHARS), plan: null };
     }
   }

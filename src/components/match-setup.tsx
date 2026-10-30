@@ -86,8 +86,8 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
       window.location.assign("/auth/sign-in?next=/");
       return;
     }
-    if (white.id === black.id) {
-      setError({ message: "Pick two different models — a model can't play itself." });
+    if (white.id === black.id && whiteMode === blackMode) {
+      setError({ message: "Same model on both sides? Give each side a different skill mode." });
       return;
     }
     if (missing.length) {
@@ -144,7 +144,7 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
         onSelect={fresh(setWhiteId)}
         mode={whiteMode}
         onMode={fresh(setWhiteMode)}
-        disabledId={blackId}
+        disabledId={whiteMode === blackMode ? blackId : null}
         keyState={keyState}
       />
 
@@ -229,7 +229,7 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
         onSelect={fresh(setBlackId)}
         mode={blackMode}
         onMode={fresh(setBlackMode)}
-        disabledId={whiteId}
+        disabledId={whiteMode === blackMode ? whiteId : null}
         keyState={keyState}
       />
     </div>
@@ -265,8 +265,11 @@ function SideSetup({
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = models.filter((m) => !q || m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
-    return PROVIDER_ORDER.map((p) => ({ provider: p, models: filtered.filter((m) => providerOf(m.id) === p) })).filter((g) => g.models.length);
-  }, [models, query]);
+    const ready = (p: ProviderId) => keyState(p) !== "missing";
+    // Providers you can play right now first; the rest keep their usual order.
+    const order = [...PROVIDER_ORDER.filter(ready), ...PROVIDER_ORDER.filter((p) => !ready(p))];
+    return order.map((p) => ({ provider: p, models: filtered.filter((m) => providerOf(m.id) === p) })).filter((g) => g.models.length);
+  }, [models, query, keyState]);
   const modeInfo = SKILL_MODES.find((m) => m.id === mode)!;
 
   return (
@@ -348,7 +351,7 @@ function SideSetup({
                         isSelected ? "bg-slate-50 ring-2 ring-slate-900" : "hover:bg-slate-50",
                         isTaken && "cursor-not-allowed opacity-40 hover:bg-transparent",
                       )}
-                      title={isTaken ? "Already playing the other side" : undefined}
+                      title={isTaken ? "Playing the other side at this skill mode. Change a skill mode to use it on both sides." : undefined}
                       data-testid={`pick-${color}-${m.id}`}
                     >
                       <span className="min-w-0 flex-1">

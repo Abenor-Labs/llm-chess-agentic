@@ -13,10 +13,11 @@ import { formatElapsed, cn } from "@/lib/utils";
 import { Board } from "./board";
 import { EvalBar } from "./eval-bar";
 import { MoveList } from "./move-list";
-import { SidePanel } from "./side-panel";
 import { RatedChip, SideDot } from "./badges";
 import { ThinkingDots } from "./thinking";
 import { useSessionUser } from "./user-menu";
+import { Commentary, PlayerCards } from "./commentary";
+import { modeConfig } from "@/lib/modes";
 
 const PIECE_GLYPH: Record<string, string> = { q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
 
@@ -124,10 +125,12 @@ export function GameView({ gameId, onNewGame, onGone }: GameViewProps) {
   const top: "white" | "black" = orientation === "white" ? "black" : "white";
   const bottom = orientation;
 
+  const players = { white: data.white, black: data.black, whiteMode: game.whiteMode, blackMode: game.blackMode };
   const bar = (color: "white" | "black") => (
     <PlayerBar
       color={color}
       model={color === "white" ? data.white : data.black}
+      mode={color === "white" ? game.whiteMode : game.blackMode}
       captured={color === "white" ? material.capturedByWhite : material.capturedByBlack}
       advantage={color === "white" ? material.diff : -material.diff}
       toMove={thinkingSide === color}
@@ -155,12 +158,12 @@ export function GameView({ gameId, onNewGame, onGone }: GameViewProps) {
         pgn={game.pgn}
       />
 
-      {/* Mobile: board, then panels. lg: board left, panels stacked right. xl: white | board | black. */}
-      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[320px_minmax(0,1fr)_320px]">
-        <div className="flex flex-col items-center gap-2 lg:col-start-1 lg:row-span-2 lg:row-start-1 xl:col-start-2 xl:row-span-1">
-          <div className="w-full max-w-[min(100%,calc(100vh-13rem))]">
+      {/* Mobile: board, players, commentary, moves. lg+: board left, match column right. */}
+      <div className="mt-3 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(340px,420px)] lg:items-start">
+        <div className="flex min-w-0 flex-col items-center gap-2">
+          <div className="w-full max-w-[min(100%,calc(100dvh-12rem))]">
             {bar(top)}
-            <div className="my-1.5 flex gap-2">
+            <div className="my-1.5 flex gap-1.5 sm:gap-2">
               <EvalBar fen={fen} orientation={orientation} />
               <div className="aspect-square min-w-0 flex-1" data-testid="board" data-fen={fen}>
                 <Board
@@ -183,35 +186,28 @@ export function GameView({ gameId, onNewGame, onGone }: GameViewProps) {
             onGo={goTo}
             onFlip={() => setOrientation((o) => (o === "white" ? "black" : "white"))}
           />
-
-          <div className="w-full max-w-[min(100%,calc(100vh-13rem))] rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-            <div className="max-h-48 overflow-y-auto" data-scroll-box>
-              <MoveList moves={moves} shown={shown} onSelectPly={goTo} />
-            </div>
-          </div>
         </div>
 
-        {(["white", "black"] as const).map((color) => (
-          <div
-            key={color}
-            className={cn(
-              "flex min-h-0 lg:col-start-2 lg:max-h-[calc((100vh-11rem)/2)] xl:row-start-1 xl:max-h-[calc(100vh-10rem)]",
-              color === "white" ? "lg:row-start-1 xl:col-start-1" : "lg:row-start-2 xl:col-start-3",
-            )}
-          >
-            <SidePanel
-              color={color}
-              model={color === "white" ? data.white : data.black}
-              mode={color === "white" ? game.whiteMode : game.blackMode}
+        <aside className="flex min-w-0 flex-col gap-3 lg:sticky lg:top-[4.5rem] lg:max-h-[calc(100dvh-5.5rem)]">
+          <PlayerCards players={players} moves={moves} toMove={thinkingSide} />
+          <div className="flex max-h-[60dvh] min-h-[16rem] flex-col lg:max-h-none lg:min-h-0 lg:flex-1">
+            <Commentary
+              players={players}
               moves={moves}
               shown={shown}
-              thinking={thinkingSide === color}
-              thinkingSince={thinkingSide === color ? lastMoveAt : null}
-              note={noteSide === color ? note : null}
+              thinking={thinkingSide}
+              thinkingSince={thinkingSide ? lastMoveAt : null}
+              note={note ? { color: noteSide, text: note } : null}
               onSelectPly={goTo}
             />
           </div>
-        ))}
+          <details className="rounded-xl border border-slate-200 bg-white" open>
+            <summary className="cursor-pointer px-4 py-2.5 text-sm font-semibold text-slate-900">Moves</summary>
+            <div className="max-h-40 overflow-y-auto px-3 pb-3" data-scroll-box>
+              <MoveList moves={moves} shown={shown} onSelectPly={goTo} />
+            </div>
+          </details>
+        </aside>
       </div>
     </div>
   );
@@ -224,6 +220,7 @@ function Centered({ children }: { children: React.ReactNode }) {
 function PlayerBar({
   color,
   model,
+  mode,
   captured,
   advantage,
   toMove,
@@ -231,18 +228,39 @@ function PlayerBar({
 }: {
   color: "white" | "black";
   model: Model;
+  mode: string;
   captured: string[];
   advantage: number;
   toMove: boolean;
   winner: boolean;
 }) {
   return (
-    <div className={cn("flex h-8 items-center gap-2 rounded-lg px-2 text-sm transition-colors", toMove ? "bg-amber-100/80" : "bg-transparent")} data-testid={`player-bar-${color}`}>
-      <SideDot color={color} />
-      <span className="truncate font-medium text-slate-900">{model.name}</span>
-      {winner && <span className="text-amber-600" title="Winner">♛</span>}
-      {toMove && <ThinkingDots />}
-      <span className="ml-auto flex items-center gap-1 text-slate-500">
+    <div
+      className={cn(
+        "flex min-h-10 items-center gap-2 rounded-lg px-2.5 py-1 text-sm ring-1 ring-inset transition-colors",
+        toMove ? "bg-amber-50 ring-amber-300" : "bg-white ring-slate-200",
+      )}
+      data-testid={`player-bar-${color}`}
+    >
+      <SideDot color={color} className="h-3.5 w-3.5" />
+      <span className="min-w-0">
+        <span className="block truncate font-semibold leading-tight text-slate-900">{model.name}</span>
+        <span className="block text-[11px] leading-tight text-slate-500">
+          {color === "white" ? "White" : "Black"} · {modeConfig(mode).label}
+        </span>
+      </span>
+      {winner && (
+        <span className="text-amber-600" title="Winner" aria-label="Winner">
+          ♛
+        </span>
+      )}
+      {toMove && (
+        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-amber-800">
+          <ThinkingDots />
+          <span className="hidden sm:inline">thinking</span>
+        </span>
+      )}
+      <span className="ml-auto flex shrink-0 items-center gap-1 text-slate-500">
         <span className="text-base leading-none tracking-tighter" aria-label={`captured: ${captured.join(" ")}`}>
           {captured.map((p, i) => (
             <span key={i}>{PIECE_GLYPH[p]}</span>
@@ -377,7 +395,7 @@ function StatusStrip({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm" data-testid="status-strip">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 sm:px-4 sm:py-3" data-testid="status-strip">
       {live && stoppable ? (
         <span className="inline-flex items-center gap-2 text-sm font-semibold text-rose-600" data-testid="live-badge">
           <span className="relative flex h-2.5 w-2.5">
@@ -405,7 +423,8 @@ function StatusStrip({
           {reason && <p className="text-sm text-slate-600">{reason}</p>}
         </div>
       )}
-      <span className="text-sm text-slate-600">
+      {/* The player cards name both sides; repeat the matchup here only where there is room. */}
+      <span className="hidden min-w-0 truncate text-sm text-slate-600 xl:inline">
         <strong className="text-slate-900">{white.name}</strong> vs <strong className="text-slate-900">{black.name}</strong>
       </span>
       <RatedChip rated={rated} />
@@ -417,7 +436,7 @@ function StatusStrip({
           Stockfish review {analysis.done}/{analysis.total}…
         </span>
       )}
-      <span className="ml-auto flex items-center gap-2">
+      <span className="flex w-full items-center justify-end gap-2 sm:ml-auto sm:w-auto">
         <button onClick={copyPgn} className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50" aria-live="polite">
           {copied ? "Copied!" : "Copy PGN"}
         </button>

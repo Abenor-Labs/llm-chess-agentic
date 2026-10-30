@@ -101,9 +101,10 @@ export function buildPrompt(ctx: PromptContext): string {
 
   sections.push(
     [
-      "Think it through: what does the opponent threaten, which captures and checks exist, is the square you move to safe?",
-      "Then reply with ONLY one JSON object, reasoning first:",
-      `{"reasoning": "2-3 sentences on threats and why this move", "plan": "your plan for the next few moves", "move": "Nf3"}`,
+      "Before choosing, check what the opponent threatens, which captures and checks exist, and whether the destination square is safe.",
+      // Asking Claude 5.x for its "reasoning" trips a reasoning-extraction refusal; a spectator comment does not.
+      "Reply with ONLY one JSON object:",
+      `{"comment": "2-3 sentences for spectators: the threats and why this move", "plan": "your plan for the next few moves", "move": "Nf3"}`,
       `"move" must be exactly one move from the legal list, in SAN.`,
     ].join("\n"),
   );
