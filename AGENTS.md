@@ -28,7 +28,7 @@ A throwaway Postgres for tests: `docker compose up -d` (port 5434), or any local
 ## Security posture
 
 - Keys are bring-your-own: stored per match (encrypted when `ENCRYPTION_KEY` is set), never returned by any API (`publicGameColumns`). Env keys are a self-hosting fallback; `/api/providers` exposes only booleans.
-- `/api/cron/tick`, `/api/games/start`, `/api/games/destroy` are intentionally ungated (browser-driven arena).
+- `/api/cron/tick` is intentionally ungated (browser-driven arena). Starting a match needs a signed-in user (Neon Managed Auth, `src/lib/auth/server.ts`); `/api/games/destroy` is admin-only (`neon_auth."user".role = 'admin'`, granted with `pnpm admin:grant`).
 - **There is no way to reset the arena** — no route, flag or script wipes games or ratings, by design. Don't add one; history is the benchmark. `destroy` only stops the single live game (deleting it only if it has no moves).
 
 ## Testing expectations
