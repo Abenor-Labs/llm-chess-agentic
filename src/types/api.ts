@@ -14,6 +14,8 @@ export const StartGameRequestSchema = z
     /** [white, black] */
     modelIds: z.tuple([z.string().min(1).max(200), z.string().min(1).max(200)]),
     whiteMode: SkillModeSchema.optional(),
+    /** Human vs Human room: the side the creator takes (default white). */
+    seat: z.enum(["white", "black"]).optional(),
     blackMode: SkillModeSchema.optional(),
     keys: z
       .object({ groq: Key, google: Key, anthropic: Key, openai: Key, subq: Key })
@@ -24,12 +26,8 @@ export const StartGameRequestSchema = z
     geminiApiKey: Key,
   })
   // A model may play itself, but only at different skill modes (such games are never rated).
-  .refine((data) => data.modelIds[0] !== data.modelIds[1] || (data.whiteMode ?? "scholar") !== (data.blackMode ?? "scholar"), {
+  .refine((data) => data.modelIds[0] !== data.modelIds[1] || data.modelIds[0] === "human" || (data.whiteMode ?? "scholar") !== (data.blackMode ?? "scholar"), {
     message: "To pit a model against itself, give each side a different skill mode",
-    path: ["modelIds"],
-  })
-  .refine((data) => !(data.modelIds[0] === "human" && data.modelIds[1] === "human"), {
-    message: "At least one side must be an AI",
     path: ["modelIds"],
   });
 export type StartGameRequest = z.infer<typeof StartGameRequestSchema>;

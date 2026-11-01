@@ -1,8 +1,8 @@
 import { db } from "@/db";
 import { games, models, moves, publicGameColumns } from "@/db/schema";
-import { asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { isRatedPairing } from "./modes";
-import { isHuman } from "./provider-ids";
+import { HUMAN_ID, isHuman } from "./provider-ids";
 import type { GameDetailResponse, GameListItem, GameStatus, PublicGame } from "@/types/api";
 
 type PublicRow = { [K in keyof typeof publicGameColumns]: unknown } & {
@@ -17,12 +17,25 @@ export function toPublicGame<T extends PublicRow>(row: T): T & { rated: boolean 
   return { ...row, rated: !isHuman(row.whiteId) && !isHuman(row.blackId) && isRatedPairing(row.whiteMode, row.blackMode) };
 }
 
+/** AI-vs-AI games only (the arena), as opposed to games with a human seat. */
+export const arenaOnly = and(ne(games.whiteId, HUMAN_ID), ne(games.blackId, HUMAN_ID))!;
+
+/** Human vs Human rooms still waiting for their second player. */
+export const openRooms = and(
+  eq(games.whiteId, HUMAN_ID),
+  eq(games.blackId, HUMAN_ID),
+  or(isNull(games.whiteUserId), isNull(games.blackUserId)),
+)!;
+
+/** Games where this user holds a seat. */
+export const seatedBy = (userId: string) => or(eq(games.whiteUserId, userId), eq(games.blackUserId, userId))!;
+
 /** Games by status, newest first, with both models and a move count. */
-export async function listGames(status: GameStatus, limit: number): Promise<GameListItem[]> {
+export async function listGames(status: GameStatus, limit: number, filter?: SQL): Promise<GameListItem[]> {
   const rows = await db
     .select(publicGameColumns)
     .from(games)
-    .where(eq(games.status, status))
+    .where(filter ? and(eq(games.status, status), filter) : eq(games.status, status))
     // Legacy rows can lack ended_at; Postgres sorts NULLs first under DESC, so fall back to started_at.
     .orderBy(sql`coalesce(${status === "complete" ? games.endedAt : games.startedAt}, ${games.startedAt}) desc`, desc(games.startedAt))
     .limit(limit);

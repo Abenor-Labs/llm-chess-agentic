@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import posthog from "posthog-js";
 import { Board } from "./board";
 import { useSessionUser } from "./user-menu";
+import { OpenRooms } from "./open-rooms";
 import { RatedChip, SideDot } from "./badges";
 
 const HUMAN_PLAYER: Model = { id: HUMAN_ID, name: "Human", provider: "human", elo: 1500, gamesPlayed: 0, wins: 0, losses: 0, draws: 0, active: true };
@@ -58,6 +59,7 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
   const [whiteMode, setWhiteMode] = useState<SkillMode>("scholar");
   const [blackMode, setBlackMode] = useState<SkillMode>("scholar");
   const [starting, setStarting] = useState(false);
+  const [mySeat, setMySeat] = useState<"white" | "black" | null>(null);
   const [error, setError] = useState<{ message: string; provider?: KeyedProvider; running?: boolean } | null>(null);
 
   const playable = useMemo(() => models.filter((m) => m.active), [models]);
@@ -108,7 +110,7 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
       const res = await fetch("/api/games/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modelIds: [white.id, black.id], whiteMode, blackMode, keys }),
+        body: JSON.stringify({ modelIds: [white.id, black.id], whiteMode, blackMode, keys, ...(mySeat ? { seat: mySeat } : {}) }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -125,24 +127,34 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
   }
 
   async function watchRunning() {
-    const res = await fetch("/api/games?status=active&limit=1").catch(() => null);
+    const res = await fetch("/api/games?status=active&limit=1&arena=1").catch(() => null);
     const id = res && res.ok ? (await res.json()).games?.[0]?.id : null;
     if (id) onStarted(id);
   }
 
   const vsHuman = whiteId === HUMAN_ID || blackId === HUMAN_ID;
+  const room = whiteId === HUMAN_ID && blackId === HUMAN_ID;
   const rated = !vsHuman && isRatedPairing(whiteMode, blackMode);
-  const label = (m: Model | null, fallback: string) => (m ? (isHuman(m.id) ? "You" : m.name) : fallback);
+  const label = (m: Model | null, color: "white" | "black", fallback: string) =>
+    m ? (isHuman(m.id) ? (color === mySeat ? "You" : "A person") : m.name) : fallback;
   // Only one side can be you; picking it again hands that side back to an AI.
+  // You can sit on one side; the other side is an AI, or "a person" (a room others join).
   function playSide(color: "white" | "black") {
     setError(null);
-    if (color === "white") {
-      setWhiteId(whiteId === HUMAN_ID ? null : HUMAN_ID);
-      if (blackId === HUMAN_ID) setBlackId(null);
+    const [setMine, setOther] = color === "white" ? [setWhiteId, setBlackId] : [setBlackId, setWhiteId];
+    if (mySeat === color) {
+      setMine(null);
+      setOther((id) => (id === HUMAN_ID ? null : id));
+      setMySeat(null);
     } else {
-      setBlackId(blackId === HUMAN_ID ? null : HUMAN_ID);
-      if (whiteId === HUMAN_ID) setWhiteId(null);
+      setMine(HUMAN_ID);
+      if (mySeat) setOther(null); // you were on the other side
+      setMySeat(color);
     }
+  }
+  function invitePerson(color: "white" | "black") {
+    setError(null);
+    (color === "white" ? setWhiteId : setBlackId)((id) => (id === HUMAN_ID ? null : HUMAN_ID));
   }
 
   return (
@@ -164,6 +176,8 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
         disabledId={whiteMode === blackMode ? blackId : null}
         keyState={keyState}
         onPlaySide={() => playSide("white")}
+        mine={mySeat === "white"}
+        onInvite={mySeat && mySeat !== "white" ? () => invitePerson("white") : undefined}
       />
 
       <div className="order-last flex flex-col gap-4 lg:sticky lg:top-20 lg:order-none lg:self-start">
@@ -175,11 +189,11 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
             <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 text-sm" aria-live="polite">
               <span className="flex min-w-0 items-center gap-1.5">
                 <SideDot color="white" />
-                <span className={cn("truncate font-medium", !white && "text-slate-400")}>{label(white, "Pick White")}</span>
+                <span className={cn("truncate font-medium", !white && "text-slate-400")}>{label(white, "white", "Pick White")}</span>
               </span>
               <span className="text-xs text-slate-400">vs</span>
               <span className="flex min-w-0 items-center justify-end gap-1.5">
-                <span className={cn("truncate font-medium", !black && "text-slate-400")}>{label(black, "Pick Black")}</span>
+                <span className={cn("truncate font-medium", !black && "text-slate-400")}>{label(black, "black", "Pick Black")}</span>
                 <SideDot color="black" />
               </span>
             </div>
@@ -196,8 +210,10 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
             </button>
             <p className="flex items-center justify-center gap-2 text-xs text-slate-500">
               <RatedChip rated={rated} />
-              {vsHuman
-                ? "You vs AI: just for fun, the leaderboard doesn't change."
+              {room
+                ? "Human vs Human: rated on the players' ladder."
+                : vsHuman
+                ? "You vs AI: counts on the Humans vs AI board; AI ratings don't change."
                 : rated
                   ? "Same skill mode: the result moves ELO."
                   : "Different skill modes: counts in W/L/D, ELO stays put."}
@@ -239,6 +255,7 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
             )}
           </div>
         </div>
+        <OpenRooms onJoined={onStarted} />
       </div>
 
       <SideSetup
@@ -254,6 +271,8 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
         disabledId={whiteMode === blackMode ? whiteId : null}
         keyState={keyState}
         onPlaySide={() => playSide("black")}
+        mine={mySeat === "black"}
+        onInvite={mySeat && mySeat !== "black" ? () => invitePerson("black") : undefined}
       />
     </div>
   );
@@ -272,6 +291,8 @@ function SideSetup({
   disabledId,
   keyState,
   onPlaySide,
+  mine,
+  onInvite,
 }: {
   color: "white" | "black";
   models: Model[];
@@ -285,6 +306,10 @@ function SideSetup({
   disabledId: string | null;
   keyState: (provider: ProviderId) => KeyState;
   onPlaySide: () => void;
+  /** You sit on this side. */
+  mine: boolean;
+  /** Offered on the side facing you: leave the seat open for a person to join. */
+  onInvite?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const groups = useMemo(() => {
@@ -302,17 +327,28 @@ function SideSetup({
       <header className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
         <SideDot color={color} />
         <h2 className="text-sm font-semibold capitalize text-slate-900">{color}</h2>
-        <button
-          onClick={onPlaySide}
-          className={cn(
-            "ml-auto rounded-lg px-2.5 py-1 text-xs font-medium ring-1 transition-colors",
-            selected === HUMAN_ID ? "text-slate-700 ring-slate-200 hover:bg-slate-50" : "bg-rose-50 text-rose-800 ring-rose-200 hover:bg-rose-100",
+        <span className="ml-auto flex gap-1.5">
+          {onInvite && selected !== HUMAN_ID && (
+            <button
+              onClick={onInvite}
+              className="rounded-lg px-2.5 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200 transition-colors hover:bg-slate-50"
+              data-testid={`invite-${color}`}
+            >
+              Invite a person
+            </button>
           )}
-          aria-pressed={selected === HUMAN_ID}
-          data-testid={`play-${color}`}
-        >
-          {selected === HUMAN_ID ? "Let an AI play" : `Play ${color} myself`}
-        </button>
+          <button
+            onClick={selected === HUMAN_ID && !mine ? onInvite : onPlaySide}
+            className={cn(
+              "rounded-lg px-2.5 py-1 text-xs font-medium ring-1 transition-colors",
+              selected === HUMAN_ID ? "text-slate-700 ring-slate-200 hover:bg-slate-50" : "bg-rose-50 text-rose-800 ring-rose-200 hover:bg-rose-100",
+            )}
+            aria-pressed={selected === HUMAN_ID}
+            data-testid={`play-${color}`}
+          >
+            {selected === HUMAN_ID ? "Let an AI play" : `Play ${color} myself`}
+          </button>
+        </span>
       </header>
 
       {selected === HUMAN_ID ? (
@@ -320,9 +356,11 @@ function SideSetup({
           <span className="text-3xl" aria-hidden>
             ☺
           </span>
-          <p className="text-sm font-semibold text-slate-900">You play {color}</p>
+          <p className="text-sm font-semibold text-slate-900">{mine ? `You play ${color}` : `A person plays ${color}`}</p>
           <p className="max-w-xs text-xs text-slate-500">
-            Drag pieces on the board when it&apos;s your turn. Pick the AI on the other side, then start.
+            {mine
+              ? "Drag pieces on the board when it's your turn. Pick an AI or invite a person for the other side, then start."
+              : "Start the room, then share the invite link. Anyone signed in can also join it from Open rooms."}
           </p>
         </div>
       ) : (

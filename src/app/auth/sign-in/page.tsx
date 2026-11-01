@@ -29,7 +29,7 @@ function SignInForm() {
     setError(null);
     const res =
       mode === "sign-up"
-        ? await authClient.signUp.email({ email, password, name: String(form.get("name") || email.split("@")[0]) })
+        ? await authClient.signUp.email({ email, password, name: String(form.get("name")).trim() })
         : await authClient.signIn.email({ email, password });
     setBusy(false);
     if (res.error) {
@@ -50,8 +50,9 @@ function SignInForm() {
       <form onSubmit={submit} className="mt-6 space-y-3">
         {mode === "sign-up" && (
           <label className="block text-sm font-medium text-slate-700">
-            Name
-            <input name="name" autoComplete="name" className={`mt-1 ${input}`} />
+            Username
+            <input name="name" required minLength={2} maxLength={24} autoComplete="nickname" className={`mt-1 ${input}`} />
+            <span className="mt-1 block text-xs font-normal text-slate-500">Shown on leaderboards and to your opponents.</span>
           </label>
         )}
         <label className="block text-sm font-medium text-slate-700">

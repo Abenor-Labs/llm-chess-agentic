@@ -2,6 +2,7 @@ import { Chess } from "chess.js";
 import { STARTING_FEN } from "./chess";
 import { BLUNDER_CP } from "./analysis";
 import type { JudgeRecord } from "./judge-types";
+import { isHuman } from "./provider-ids";
 
 /**
  * Pure helpers that turn API data into what the game screen shows. Kept free
@@ -137,4 +138,11 @@ export function sideAccuracy(moves: ReadonlyArray<{ color: "white" | "black"; mo
     acpl: Math.round(acpl),
     blunders: mine.filter((m) => classifyMove(m.cpLoss) === "blunder").length,
   };
+}
+
+/** Name to show for a side: the model, or for a human seat the player (an empty room seat shows as open). */
+export function seatName(model: { id: string; name: string } | undefined, userId: string | null, userName: string | null): string {
+  if (!model) return "Unknown";
+  if (!isHuman(model.id)) return model.name;
+  return userName ?? (userId ? "Human" : "Open seat");
 }

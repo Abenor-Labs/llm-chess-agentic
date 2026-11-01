@@ -8,7 +8,7 @@ import { ProviderChip } from "@/components/badges";
 import { cn } from "@/lib/utils";
 import type { AccuracyStat } from "@/types/api";
 
-export default function LeaderboardPage() {
+function AiLeaderboard() {
   const { models, isLoading, error, refetch, isRefetching } = useLeaderboard();
   const [accuracy, setAccuracy] = useState<Record<string, AccuracyStat>>({});
   const [showAll, setShowAll] = useState(false);
@@ -127,6 +127,133 @@ export default function LeaderboardPage() {
             })}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+type Tab = "ai" | "vs-ai" | "humans";
+const TABS: Array<{ id: Tab; label: string }> = [
+  { id: "ai", label: "AI models" },
+  { id: "vs-ai", label: "Humans vs AI" },
+  { id: "humans", label: "Human vs Human" },
+];
+
+export default function LeaderboardPage() {
+  const [tab, setTab] = useState<Tab>("ai");
+  return (
+    <>
+      <div className="mx-auto max-w-[1200px] px-3 pt-6 sm:px-6">
+        <div role="tablist" aria-label="Leaderboards" className="inline-flex rounded-lg bg-slate-100 p-1">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={tab === t.id}
+              onClick={() => setTab(t.id)}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                tab === t.id ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900",
+              )}
+              data-testid={`tab-${t.id}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {tab === "ai" ? <AiLeaderboard /> : <HumanLeaderboard board={tab} />}
+    </>
+  );
+}
+
+interface HumanRow {
+  userId: string;
+  name: string;
+  elo?: number;
+  games?: number;
+  gamesPlayed?: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  avgOpponentElo?: number;
+}
+
+/** Players ranked by their Human vs AI record, or by the Human vs Human ladder. */
+function HumanLeaderboard({ board }: { board: "vs-ai" | "humans" }) {
+  const visible = usePageVisibility();
+  const [rows, setRows] = useState<HumanRow[] | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    const load = () =>
+      fetch(`/api/leaderboard?board=${board}`, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((d) => {
+          if (cancelled) return;
+          setRows(d.players ?? []);
+          setFailed(false);
+        })
+        .catch(() => !cancelled && setFailed(true));
+    void load();
+    const t = setInterval(load, POLLING_INTERVALS.GAMES_LIST_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [board, visible]);
+
+  const vsAi = board === "vs-ai";
+  return (
+    <div className="mx-auto max-w-[1200px] px-3 py-6 sm:px-6">
+      <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">{vsAi ? "Humans vs AI" : "Human vs Human"}</h1>
+      <p className="mt-1 max-w-2xl text-sm text-slate-500">
+        {vsAi
+          ? "Players ranked by score against AI models (win 1, draw ½). AI ratings never change in these games."
+          : "Rooms between two signed-in players. Everyone starts at 1500 ELO (K=32)."}{" "}
+        Updates live while this page is open.
+      </p>
+      <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+        <table className="w-full min-w-[520px] text-sm" data-testid={`leaderboard-${board}`}>
+          <thead>
+            <tr className="border-b border-slate-100 text-left text-xs font-medium text-slate-500">
+              <th className="px-4 py-3">#</th>
+              <th className="px-4 py-3">Player</th>
+              {!vsAi && <th className="px-4 py-3 text-right">ELO</th>}
+              <th className="px-4 py-3 text-right">Games</th>
+              <th className="px-4 py-3 text-right">W / L / D</th>
+              <th className="px-4 py-3 text-right">Score</th>
+              {vsAi && <th className="px-4 py-3 text-right">Avg AI rating</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {rows?.map((r, i) => {
+              const games = r.games ?? r.gamesPlayed ?? 0;
+              return (
+                <tr key={r.userId} className="border-b border-slate-50 last:border-0">
+                  <td className="px-4 py-3 tabular-nums text-slate-400">{i + 1}</td>
+                  <td className="px-4 py-3 font-medium text-slate-900">{r.name}</td>
+                  {!vsAi && <td className="px-4 py-3 text-right font-semibold tabular-nums">{r.elo}</td>}
+                  <td className="px-4 py-3 text-right tabular-nums">{games}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {r.wins} / {r.losses} / {r.draws}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">{games ? Math.round(((r.wins + r.draws / 2) / games) * 100) : 0}%</td>
+                  {vsAi && <td className="px-4 py-3 text-right tabular-nums">{r.avgOpponentElo}</td>}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {rows === null && !failed && <p className="px-4 py-8 text-center text-sm text-slate-400">Loading…</p>}
+        {failed && <p className="px-4 py-8 text-center text-sm text-rose-700">Couldn&apos;t load this board. It retries automatically.</p>}
+        {rows?.length === 0 && (
+          <p className="px-4 py-8 text-center text-sm text-slate-500">
+            {vsAi ? "No finished games against AI yet. Play one from the Play page." : "No finished rooms yet. Open one from the Play page."}
+          </p>
+        )}
       </div>
     </div>
   );

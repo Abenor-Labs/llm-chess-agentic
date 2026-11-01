@@ -8,7 +8,7 @@ export const hasDb = Boolean(process.env.TEST_DATABASE_URL);
 
 /** Empty every table and re-seed the roster (ratings at 1500). */
 export async function resetDb() {
-  await db.execute(sql`TRUNCATE moves, games, models, tournament RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE moves, games, models, tournament, players RESTART IDENTITY CASCADE`);
   await seedRoster(db);
 }
 

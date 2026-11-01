@@ -13,9 +13,14 @@ export default function Home() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/games?status=active&limit=1", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : { games: [] }))
-      .then((d) => !cancelled && setGameId(d.games?.[0]?.id ?? null))
+    // Your own live human game comes first, then the AI arena's live game.
+    const first = (url: string) =>
+      fetch(url, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : { games: [] }))
+        .then((d) => (d.games?.[0]?.id as string | undefined) ?? null);
+    first("/api/games?status=active&limit=1&mine=1")
+      .then((mine) => mine ?? first("/api/games?status=active&limit=1&arena=1"))
+      .then((id) => !cancelled && setGameId(id))
       .catch(() => !cancelled && setGameId(null));
     return () => {
       cancelled = true;

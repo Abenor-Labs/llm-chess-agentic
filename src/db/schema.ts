@@ -48,6 +48,12 @@ export const games = pgTable("games", {
   statusNote: text("status_note"),
   // neon_auth."user".id of whoever started the match (null for pre-auth games).
   startedBy: text("started_by"),
+  // Human seats (model id "human"): who sits on each side, and the name shown.
+  // A Human vs Human room starts with one seat empty until someone joins.
+  whiteUserId: text("white_user_id"),
+  blackUserId: text("black_user_id"),
+  whiteUserName: text("white_user_name"),
+  blackUserName: text("black_user_name"),
   // Serverless-safe processing claim: a game is claimed atomically before a tick
   // processes it, preventing overlapping ticks / instances from double-moving.
   processing: boolean("processing").notNull().default(false),
@@ -86,6 +92,17 @@ export const moves = pgTable(
   (t) => [index("moves_game_ply_idx").on(t.gameId, t.moveNumber)],
 );
 
+/** Human vs Human ratings, one row per signed-in player (neon_auth user id). */
+export const players = pgTable("players", {
+  userId: text("user_id").primaryKey(),
+  name: text("name").notNull(),
+  elo: integer("elo").notNull().default(1500),
+  gamesPlayed: integer("games_played").notNull().default(0),
+  wins: integer("wins").notNull().default(0),
+  losses: integer("losses").notNull().default(0),
+  draws: integer("draws").notNull().default(0),
+});
+
 export const tournament = pgTable("tournament", {
   id: integer("id").primaryKey().default(1),
   status: tournamentStatusEnum("status").notNull().default("stopped"),
@@ -114,9 +131,14 @@ export const publicGameColumns = {
   analyzed: games.analyzed,
   statusNote: games.statusNote,
   startedBy: games.startedBy,
+  whiteUserId: games.whiteUserId,
+  blackUserId: games.blackUserId,
+  whiteUserName: games.whiteUserName,
+  blackUserName: games.blackUserName,
 };
 
 export type Model = typeof models.$inferSelect;
 export type Game = typeof games.$inferSelect;
 export type Move = typeof moves.$inferSelect;
 export type Tournament = typeof tournament.$inferSelect;
+export type Player = typeof players.$inferSelect;

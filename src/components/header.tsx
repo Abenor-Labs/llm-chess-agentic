@@ -25,7 +25,7 @@ export function Header({ onSettingsClick }: { onSettingsClick: () => void }) {
     let cancelled = false;
     const check = async () => {
       try {
-        const res = await fetch("/api/games?status=active&limit=1", { cache: "no-store" });
+        const res = await fetch("/api/games?status=active&limit=1&arena=1", { cache: "no-store" });
         if (!res.ok || cancelled) return;
         const g = (await res.json()).games?.[0];
         setLive(g ? { id: g.id, label: `${g.whiteModel?.name ?? "White"} vs ${g.blackModel?.name ?? "Black"}` } : null);

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { games, models, tournament } from "@/db/schema";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { processGame, purgeLegacyCancelledGames } from "@/lib/game-processor";
 import { providerOf, isKeyedProvider, resolveKey, PROVIDER_LABEL, type ApiKeys, type KeyedProvider } from "@/lib/ai";
@@ -9,6 +9,8 @@ import { StartGameRequestSchema } from "@/types/api";
 import { encryptSecret } from "@/lib/crypto";
 import { DEFAULT_MODE } from "@/lib/modes";
 import { requireUser } from "@/lib/auth/server";
+import { isHuman } from "@/lib/provider-ids";
+import { arenaOnly } from "@/lib/game-queries";
 
 // The first ply is played synchronously so a rejected key surfaces right here.
 // Must be a literal for Next.js; tests assert it equals GAME_RULES.TICK_MAX_DURATION_S.
@@ -30,6 +32,10 @@ export async function POST(request: Request) {
   }
   const { modelIds, whiteMode, blackMode } = parsed.data;
   const [whiteId, blackId] = modelIds;
+  // Human games (vs AI, or a Human vs Human room) run alongside the AI arena.
+  const humanGame = isHuman(whiteId) || isHuman(blackId);
+  const mySeat = isHuman(whiteId) && isHuman(blackId) ? (parsed.data.seat ?? "white") : isHuman(whiteId) ? "white" : isHuman(blackId) ? "black" : null;
+  const myName = user.name?.trim() || "Player";
 
   // Only keys for providers actually playing are kept (and only for this match).
   const supplied: ApiKeys = {
@@ -60,8 +66,17 @@ export async function POST(request: Request) {
     gameId = await db.transaction(async (tx) => {
       // Serialize starts; the unique partial index on active games is the backstop.
       await tx.execute(sql`SELECT pg_advisory_xact_lock(12345)`);
-      const [active] = await tx.select({ id: games.id }).from(games).where(eq(games.status, "active")).limit(1);
-      if (active) throw new StartError("A game is already running. Stop it before starting another.", 409);
+      if (humanGame) {
+        const [mine] = await tx
+          .select({ id: games.id })
+          .from(games)
+          .where(and(eq(games.status, "active"), or(eq(games.whiteUserId, user.id), eq(games.blackUserId, user.id))))
+          .limit(1);
+        if (mine) throw new StartError("You already have a live game. Finish it before starting another.", 409);
+      } else {
+        const [active] = await tx.select({ id: games.id }).from(games).where(and(eq(games.status, "active"), arenaOnly)).limit(1);
+        if (active) throw new StartError("A game is already running. Stop it before starting another.", 409);
+      }
 
       const rows = await tx
         .select({ id: models.id })
@@ -79,6 +94,8 @@ export async function POST(request: Request) {
         status: "active",
         startedAt: new Date(),
         startedBy: user.id,
+        ...(mySeat === "white" ? { whiteUserId: user.id, whiteUserName: myName } : {}),
+        ...(mySeat === "black" ? { blackUserId: user.id, blackUserName: myName } : {}),
         whiteMode: whiteMode ?? DEFAULT_MODE,
         blackMode: blackMode ?? DEFAULT_MODE,
         groqApiKey: stored("groq"),

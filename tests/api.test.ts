@@ -10,13 +10,15 @@ import { GET as gameDetail } from "@/app/api/games/[id]/route";
 import { POST as analysis } from "@/app/api/games/[id]/analysis/route";
 import { POST as destroy } from "@/app/api/games/destroy/route";
 import { POST as humanMove } from "@/app/api/games/[id]/move/route";
+import { POST as joinRoom } from "@/app/api/games/[id]/join/route";
+import { POST as resign } from "@/app/api/games/[id]/resign/route";
 import { GET as leaderboard } from "@/app/api/leaderboard/route";
 import { GET as accuracy } from "@/app/api/analytics/accuracy/route";
 import { GAME_RULES } from "@/lib/config";
 import { endGame, processGame } from "@/lib/game-processor";
 import { seedRoster } from "@/db/seed";
 import { readdirSync, statSync } from "fs";
-import { join } from "path";
+import { join, sep } from "path";
 import { hasDb, resetDb, createGame, getGame, getMoves, getModel, jsonRequest } from "./helpers";
 
 vi.mock("ai", async (importOriginal) => {
@@ -59,16 +61,20 @@ describe("API surface", () => {
       for (const name of readdirSync(dir)) {
         const full = join(dir, name);
         if (statSync(full).isDirectory()) walk(full);
-        else if (name === "route.ts") routes.push(dir.slice(root.length) || "/");
+        else if (name === "route.ts") routes.push(dir.slice(root.length).split(sep).join("/") || "/");
       }
     };
     walk(root);
     expect(routes.sort()).toEqual([
       "/analytics/accuracy",
+      "/auth/[...path]",
       "/cron/tick",
       "/games",
       "/games/[id]",
       "/games/[id]/analysis",
+      "/games/[id]/join",
+      "/games/[id]/move",
+      "/games/[id]/resign",
       "/games/destroy",
       "/games/start",
       "/leaderboard",
@@ -274,7 +280,63 @@ describe.skipIf(!hasDb)("API routes (real database)", () => {
       const started = await (await start(jsonRequest("/api/games/start", { modelIds: ["local/greedy", "human"] }))).json();
       await endGame(started.gameId, "1-0", "Checkmate");
       expect(await getModel("local/greedy")).toMatchObject({ elo: 1500, gamesPlayed: 0, wins: 0 });
-      expect((await start(jsonRequest("/api/games/start", { modelIds: ["human", "human"], whiteMode: "novice" }))).status).toBe(400);
+    });
+  });
+
+  describe("Human vs Human rooms", () => {
+    const alice = { id: "u-alice", email: "a@test", name: "Alice", role: "user" };
+    const bob = { id: "u-bob", email: "b@test", name: "Bob", role: "user" };
+    const move = (id: string, m: string) => humanMove(jsonRequest(`/api/games/${id}/move`, { move: m }), params(id));
+    const join = (id: string) => joinRoom(jsonRequest(`/api/games/${id}/join`, {}), params(id));
+
+    it("opens a room beside a running arena game, seats a joiner, and rates both players", async () => {
+      await createGame({ whiteId: "local/random", blackId: "local/greedy" }); // the AI arena is busy
+      session.user = alice;
+      const res = await start(jsonRequest("/api/games/start", { modelIds: ["human", "human"], seat: "black" }));
+      expect(res.status).toBe(200);
+      const { gameId } = await res.json();
+      const open = await (await listGames(get("/api/games?status=active&open=1"))).json();
+      expect(open.games.map((g: { id: string }) => g.id)).toEqual([gameId]);
+      expect((await move(gameId, "e2e4")).status).toBe(409); // White's seat is still empty
+
+      session.user = bob;
+      expect((await join(gameId)).status).toBe(200);
+      expect(await getGame(gameId)).toMatchObject({ whiteUserId: "u-bob", whiteUserName: "Bob", blackUserId: "u-alice" });
+      expect((await join(gameId)).status).toBe(200); // already seated: idempotent
+      session.user = { ...bob, id: "u-carol" };
+      expect((await join(gameId)).status).toBe(409); // full
+
+      session.user = bob;
+      expect((await move(gameId, "e2e4")).status).toBe(200);
+      session.user = alice;
+      expect((await move(gameId, "e7e5")).status).toBe(200);
+      await endGame(gameId, "1-0", "Checkmate");
+      const ladder = await (await leaderboard(get("/api/leaderboard?board=humans"))).json();
+      expect(ladder.players.map((p: { name: string; elo: number }) => [p.name, p.elo])).toEqual([["Bob", 1516], ["Alice", 1484]]);
+      expect(await getModel("human")).toMatchObject({ gamesPlayed: 0 });
+    });
+
+    it("lets a seated player resign, and cancels an unjoined room", async () => {
+      session.user = alice;
+      const vsAi = (await (await start(jsonRequest("/api/games/start", { modelIds: ["human", "local/greedy"] }))).json()).gameId;
+      session.user = bob;
+      expect((await resign(jsonRequest("", {}), params(vsAi))).status).toBe(403);
+      session.user = alice;
+      expect((await resign(jsonRequest("", {}), params(vsAi))).status).toBe(200);
+      expect(await getGame(vsAi)).toMatchObject({ status: "complete", result: "0-1", resultReason: "White resigned" });
+
+      const room = (await (await start(jsonRequest("/api/games/start", { modelIds: ["human", "human"] }))).json()).gameId;
+      expect(await (await resign(jsonRequest("", {}), params(room))).json()).toMatchObject({ cancelled: true });
+      expect(await getGame(room)).toBeUndefined();
+    });
+
+    it("lists Human vs AI records per player and allows one live human game each", async () => {
+      session.user = alice;
+      const { gameId } = await (await start(jsonRequest("/api/games/start", { modelIds: ["human", "local/greedy"] }))).json();
+      expect((await start(jsonRequest("/api/games/start", { modelIds: ["human", "local/random"] }))).status).toBe(409);
+      await endGame(gameId, "1-0", "Checkmate");
+      const board = await (await leaderboard(get("/api/leaderboard?board=vs-ai"))).json();
+      expect(board.players).toEqual([expect.objectContaining({ userId: "u-alice", name: "Alice", games: 1, wins: 1, avgOpponentElo: 1500 })]);
     });
   });
 
@@ -361,7 +423,7 @@ describe.skipIf(!hasDb)("API routes (real database)", () => {
   describe("GET /api/leaderboard", () => {
     it("orders by rating", async () => {
       await db.update(models).set({ elo: 1700 }).where(eq(models.id, "local/engine-4"));
-      const { models: rows } = await (await leaderboard()).json();
+      const { models: rows } = await (await leaderboard(get("/api/leaderboard"))).json();
       expect(rows[0].id).toBe("local/engine-4");
       expect(rows.length).toBeGreaterThan(10);
     });

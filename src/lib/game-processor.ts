@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import type { Chess } from "chess.js";
-import { games, moves, models, type Game, type Move } from "@/db/schema";
+import { games, moves, models, players, type Game, type Move } from "@/db/schema";
 import { and, asc, desc, eq, isNull, lt, or, like, sql } from "drizzle-orm";
 import { loadGame, gameStatus, toPgn, getMoveNumber, resolveMove, type GameResult } from "./chess";
 import { adjudicate } from "./engine";
@@ -137,6 +137,11 @@ async function playOnePly(gameId: string, summary: ProcessSummary): Promise<PlyO
   }
 
   if (game.startedAt && Date.now() - new Date(game.startedAt).getTime() > GAME_RULES.GAME_TIME_LIMIT_MS) {
+    // Nobody joined the room: remove it rather than score a game that never happened.
+    if (isHuman(game.whiteId) && isHuman(game.blackId) && (!game.whiteUserId || !game.blackUserId)) {
+      await abortGame(game.id);
+      return "stop";
+    }
     const verdict = adjudicate(game.fen);
     await endGame(game.id, verdict.result, verdict.reason);
     return "stop";
@@ -263,13 +268,15 @@ export type HumanMoveResult = { ok: true; outcome: PlyOutcome } | { ok: false; s
 export async function playHumanMove(gameId: string, userId: string, raw: string): Promise<HumanMoveResult> {
   const [game] = await db.select().from(games).where(eq(games.id, gameId));
   if (!game || game.status !== "active") return { ok: false, status: 409, error: "This game is not running." };
-  if (game.startedBy !== userId) return { ok: false, status: 403, error: "Only the player who started this match can move." };
-
   const history = await moveHistory(game.id);
   const chess = loadGame(game.fen, history.map((m) => m.moveSan));
   const color: Color = chess.turn() === "w" ? "white" : "black";
   const modelId = color === "white" ? game.whiteId : game.blackId;
-  if (!isHuman(modelId)) return { ok: false, status: 409, error: "It's not your turn." };
+  if (game.whiteUserId !== userId && game.blackUserId !== userId) return { ok: false, status: 403, error: "You're not playing in this game." };
+  if (!isHuman(modelId) || (color === "white" ? game.whiteUserId : game.blackUserId) !== userId) {
+    const waiting = isHuman(modelId) && !(color === "white" ? game.whiteUserId : game.blackUserId);
+    return { ok: false, status: 409, error: waiting ? "Waiting for an opponent to join." : "It's not your turn." };
+  }
 
   const resolved = resolveMove(chess.fen(), raw);
   if (!resolved) return { ok: false, status: 400, error: `${raw} is not a legal move here.` };
@@ -290,6 +297,48 @@ export async function playHumanMove(gameId: string, userId: string, raw: string)
   });
   if (outcome === "stop") return { ok: false, status: 409, error: "The position changed. Refresh and try again." };
   return { ok: true, outcome };
+}
+
+/**
+ * Takes the empty seat of a Human vs Human room. The clock restarts so the
+ * time limit counts from when both players are present.
+ */
+export async function joinRoom(gameId: string, userId: string, name: string): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const [game] = await db.select().from(games).where(eq(games.id, gameId));
+  if (!game || game.status !== "active") return { ok: false, status: 409, error: "This room is closed." };
+  if (!isHuman(game.whiteId) || !isHuman(game.blackId)) return { ok: false, status: 400, error: "This isn't a Human vs Human room." };
+  if (game.whiteUserId === userId || game.blackUserId === userId) return { ok: true };
+  const seat = !game.whiteUserId ? "white" : !game.blackUserId ? "black" : null;
+  if (!seat) return { ok: false, status: 409, error: "This room is full." };
+  const [busy] = await db
+    .select({ id: games.id })
+    .from(games)
+    .where(and(eq(games.status, "active"), or(eq(games.whiteUserId, userId), eq(games.blackUserId, userId))))
+    .limit(1);
+  if (busy) return { ok: false, status: 409, error: "You already have a live game. Finish it before joining another." };
+  const taken = await db
+    .update(games)
+    .set(seat === "white" ? { whiteUserId: userId, whiteUserName: name, startedAt: new Date() } : { blackUserId: userId, blackUserName: name, startedAt: new Date() })
+    .where(and(eq(games.id, gameId), eq(games.status, "active"), isNull(seat === "white" ? games.whiteUserId : games.blackUserId)))
+    .returning({ id: games.id });
+  return taken.length ? { ok: true } : { ok: false, status: 409, error: "Someone else just took that seat." };
+}
+
+/**
+ * A seated human gives up: the opponent wins. A room nobody has joined yet is
+ * simply cancelled (deleted), since no game took place.
+ */
+export async function resignGame(gameId: string, userId: string): Promise<{ ok: true; cancelled: boolean } | { ok: false; status: number; error: string }> {
+  const [game] = await db.select().from(games).where(eq(games.id, gameId));
+  if (!game || game.status !== "active") return { ok: false, status: 409, error: "This game is already over." };
+  const seat = game.whiteUserId === userId ? "white" : game.blackUserId === userId ? "black" : null;
+  if (!seat) return { ok: false, status: 403, error: "You're not playing in this game." };
+  if (isHuman(game.whiteId) && isHuman(game.blackId) && (!game.whiteUserId || !game.blackUserId)) {
+    await abortGame(game.id);
+    return { ok: true, cancelled: true };
+  }
+  const ended = await endGame(game.id, seat === "white" ? "0-1" : "1-0", `${seat === "white" ? "White" : "Black"} resigned`);
+  return ended ? { ok: true, cancelled: false } : { ok: false, status: 409, error: "This game is already over." };
 }
 
 /** Deletes a game and its moves. For matches that never really started. */
@@ -317,8 +366,16 @@ export async function endGame(gameId: string, result: GameResult | null, reason:
       .where(and(eq(games.id, gameId), eq(games.status, "active")))
       .returning();
     if (!ended) return false;
-    // Self-play and Human vs AI games are recorded but never touch the leaderboard.
-    if (!result || ended.whiteId === ended.blackId || isHuman(ended.whiteId) || isHuman(ended.blackId)) return true;
+    if (!result) return true;
+    // Human vs Human: rate the two players on their own ladder (players table).
+    if (isHuman(ended.whiteId) && isHuman(ended.blackId)) {
+      if (ended.whiteUserId && ended.blackUserId && ended.whiteUserId !== ended.blackUserId) {
+        await ratePlayers(tx, ended, result);
+      }
+      return true;
+    }
+    // Self-play and Human vs AI games are recorded but never touch model ratings.
+    if (ended.whiteId === ended.blackId || isHuman(ended.whiteId) || isHuman(ended.blackId)) return true;
     const rated = isRatedPairing(ended.whiteMode, ended.blackMode);
 
     // Lock both rating rows in a fixed order to avoid deadlocks.
@@ -349,6 +406,38 @@ export async function endGame(gameId: string, result: GameResult | null, reason:
     }
     return true;
   });
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function ratePlayers(tx: Tx, game: Game, result: GameResult) {
+  const seats = [
+    { id: game.whiteUserId!, name: game.whiteUserName ?? "Player", isWhite: true },
+    { id: game.blackUserId!, name: game.blackUserName ?? "Player", isWhite: false },
+  ];
+  for (const s of seats) await tx.insert(players).values({ userId: s.id, name: s.name }).onConflictDoUpdate({ target: players.userId, set: { name: s.name } });
+  // Lock both rows in a fixed order to avoid deadlocks, then rate from the pre-game ratings.
+  const rows = await tx
+    .select()
+    .from(players)
+    .where(or(eq(players.userId, seats[0].id), eq(players.userId, seats[1].id)))
+    .orderBy(asc(players.userId))
+    .for("update");
+  const elo = new Map(rows.map((r) => [r.userId, r.elo]));
+  for (const [me, opp] of [[seats[0], seats[1]], [seats[1], seats[0]]] as const) {
+    const outcome = outcomeFromResult(result, me.isWhite);
+    const { newRating } = calculateNewElo(elo.get(me.id) ?? 1500, elo.get(opp.id) ?? 1500, outcome);
+    await tx
+      .update(players)
+      .set({
+        elo: newRating,
+        gamesPlayed: sql`${players.gamesPlayed} + 1`,
+        wins: sql`${players.wins} + ${outcome === "win" ? 1 : 0}`,
+        losses: sql`${players.losses} + ${outcome === "loss" ? 1 : 0}`,
+        draws: sql`${players.draws} + ${outcome === "draw" ? 1 : 0}`,
+      })
+      .where(eq(players.userId, me.id));
+  }
 }
 
 /**

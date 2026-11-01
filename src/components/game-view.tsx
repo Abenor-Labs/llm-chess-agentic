@@ -7,7 +7,7 @@ import { useGameData } from "@/hooks/use-game-data";
 import { useAutoTick } from "@/hooks/use-auto-tick";
 import { useGamePlayback } from "@/hooks/use-game-playback";
 import { useGameAnalysis } from "@/hooks/use-game-analysis";
-import { buildPlies, fenAt, materialSummary, resultHeadline, formatDuration } from "@/lib/view-model";
+import { buildPlies, fenAt, materialSummary, resultHeadline, formatDuration, seatName } from "@/lib/view-model";
 import { playSound, soundForSan } from "@/lib/sounds";
 import { formatElapsed, cn } from "@/lib/utils";
 import { Board } from "./board";
@@ -54,8 +54,28 @@ export function GameView({ gameId, onNewGame, onGone }: GameViewProps) {
 
   // Human vs AI: the player who started the match moves on the board.
   const { user } = useSessionUser();
-  const humanColor = game ? (isHuman(game.whiteId) ? "white" : isHuman(game.blackId) ? "black" : null) : null;
-  const isMine = Boolean(humanColor && user && game?.startedBy === user.id);
+  // Your seat, if you play in this game (Human vs AI or a Human vs Human room).
+  const humanColor = user && game ? (game.whiteUserId === user.id ? "white" : game.blackUserId === user.id ? "black" : null) : null;
+  const isMine = Boolean(humanColor);
+  const openSeat =
+    game && isHuman(game.whiteId) && isHuman(game.blackId) ? (!game.whiteUserId ? "white" : !game.blackUserId ? "black" : null) : null;
+  const [busy, setBusy] = useState(false);
+  const [copiedInvite, setCopiedInvite] = useState(false);
+
+  async function act(path: "join" | "resign") {
+    if (!game) return;
+    if (path === "resign" && !confirm(openSeat ? "Cancel this room?" : "Resign this game? Your opponent wins.")) return;
+    setBusy(true);
+    setMoveError(null);
+    const res = await fetch(`/api/games/${game.id}/${path}`, { method: "POST" }).catch(() => null);
+    setBusy(false);
+    if (!res?.ok) {
+      setMoveError((await res?.json().catch(() => null))?.error ?? "Something went wrong. Try again.");
+      return;
+    }
+    if (path === "resign" && (await res.json().catch(() => null))?.cancelled) onGone?.();
+    else await refetch();
+  }
   const latestTurn = (fenAt(plies, plies.length).split(" ")[1] ?? "w") === "w" ? "white" : "black";
   const myTurn = Boolean(live && isMine && latestTurn === humanColor && following && caughtUp);
   const [pending, setPending] = useState<{ fen: string; at: number } | null>(null);
@@ -160,11 +180,14 @@ export function GameView({ gameId, onNewGame, onGone }: GameViewProps) {
   const top: "white" | "black" = orientation === "white" ? "black" : "white";
   const bottom = orientation;
 
-  const players = { white: data.white, black: data.black, whiteMode: game.whiteMode, blackMode: game.blackMode };
+  // Human seats show the player's name instead of the shared "Human" roster row.
+  const white = { ...data.white, name: seatName(data.white, game.whiteUserId, game.whiteUserName) };
+  const black = { ...data.black, name: seatName(data.black, game.blackUserId, game.blackUserName) };
+  const players = { white, black, whiteMode: game.whiteMode, blackMode: game.blackMode };
   const bar = (color: "white" | "black") => (
     <PlayerBar
       color={color}
-      model={color === "white" ? data.white : data.black}
+      model={color === "white" ? white : black}
       mode={color === "white" ? game.whiteMode : game.blackMode}
       captured={color === "white" ? material.capturedByWhite : material.capturedByBlack}
       advantage={color === "white" ? material.diff : -material.diff}
@@ -179,8 +202,8 @@ export function GameView({ gameId, onNewGame, onGone }: GameViewProps) {
         live={live || (!caughtUp && cursor === null)}
         result={game.result}
         reason={game.resultReason}
-        white={data.white}
-        black={data.black}
+        white={white}
+        black={black}
         rated={game.rated}
         startedAt={game.startedAt}
         endedAt={game.endedAt}
@@ -223,10 +246,56 @@ export function GameView({ gameId, onNewGame, onGone }: GameViewProps) {
             onGo={goTo}
             onFlip={flip}
           />
-          {isMine && live && (
-            <p className={cn("text-sm", moveError ? "text-rose-600" : "text-slate-600")} role="status" data-testid="human-turn">
-              {moveError ?? (myTurn ? "Your move: drag a piece." : latestTurn === humanColor ? "Catching up…" : "Waiting for the AI's reply…")}
-            </p>
+          {live && (isMine || openSeat) && (
+            <div className="flex w-full max-w-[min(100%,calc(100dvh-12rem))] flex-wrap items-center gap-2" data-testid="human-controls">
+              <p className={cn("min-w-0 flex-1 text-sm", moveError ? "text-rose-600" : "text-slate-600")} role="status" data-testid="human-turn">
+                {moveError ??
+                  (openSeat
+                    ? isMine
+                      ? "Waiting for an opponent. Share the invite link."
+                      : user
+                        ? `Open seat: play ${openSeat}.`
+                        : "Sign in to take the open seat."
+                    : myTurn
+                      ? "Your move: drag a piece."
+                      : latestTurn === humanColor
+                        ? "Catching up…"
+                        : "Waiting for your opponent…")}
+              </p>
+              {openSeat && isMine && (
+                <button
+                  onClick={() => {
+                    void navigator.clipboard.writeText(window.location.origin + `/game/${game.id}`).then(() => {
+                      setCopiedInvite(true);
+                      setTimeout(() => setCopiedInvite(false), 1500);
+                    });
+                  }}
+                  className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
+                >
+                  {copiedInvite ? "Copied!" : "Copy invite link"}
+                </button>
+              )}
+              {openSeat && !isMine && user && (
+                <button
+                  onClick={() => act("join")}
+                  disabled={busy}
+                  className="rounded-lg bg-slate-900 px-4 py-1.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
+                  data-testid="join-room"
+                >
+                  Join as {openSeat}
+                </button>
+              )}
+              {isMine && (
+                <button
+                  onClick={() => act("resign")}
+                  disabled={busy}
+                  className="rounded-lg px-3 py-1.5 text-sm font-semibold text-rose-700 ring-1 ring-rose-200 hover:bg-rose-50 disabled:opacity-50"
+                  data-testid="resign"
+                >
+                  {openSeat ? "Cancel room" : "Resign"}
+                </button>
+              )}
+            </div>
           )}
         </div>
 
