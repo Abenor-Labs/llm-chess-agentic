@@ -11,6 +11,7 @@ src/
   hooks/               useGameData, useAutoTick, useGamePlayback, useStockfish, useGameAnalysis
   lib/
     engine/            0x88 move generator + alpha-beta/quiescence search (perft-verified)
+    neural/            "depth 5" NNUE engine (local/neural): weights loader, evaluator, search
     ai/                providers (effort mapping), prompt, response parsing, requestMove
     judge.ts           turns a model's answers into a legal move it actually chose
     players.ts         LLM players (via the judge) and built-in engine bots
@@ -62,7 +63,7 @@ Everything the judge did is stored as structured events in `moves.judge` and sho
 
 ## Players and modes
 
-`players.ts` routes `local/*` ids to the built-in engine and everything else to the judge + `requestMove`. Built-in bots avoid revisiting earlier positions when ahead (search can't see game history).
+`players.ts` routes `local/*` ids to the built-in engines and everything else to the judge + `requestMove`. Built-in players: `local/random`, `local/greedy`, `local/engine-2`, `local/engine-4` (the rating anchor; don't change it) and `local/neural` ("depth 5", below). The `lib/engine` bots avoid revisiting earlier positions when ahead (their search can't see game history); depth 5 gets the game's earlier positions and scores a repetition as a draw.
 
 A skill mode (`modes.ts`) sets:
 
@@ -77,6 +78,10 @@ The prompt (`ai/prompt.ts`) also includes the full PGN, a labelled board, the le
 ## Engine (`lib/engine`)
 
 A compact 0x88 board with legal move generation, make/unmake and SAN (verified by perft against the standard suite and by matching chess.js's legal-move set across hundreds of random positions), plus a negamax alpha-beta search with quiescence, MVV-LVA ordering, piece-square-table evaluation, mate scoring and iterative deepening under a time cap. `analyze()` scores every root move exactly. It powers the blunder guard, hints, the threat brief, adjudication and the built-in bots — about 1000× faster than searching with chess.js.
+
+## depth 5 (`lib/neural`)
+
+`local/neural` is a TypeScript port of the "depth 5" engine from ML-AI (`reasoning_harness/chess_nnue`, model card `DEPTH5.md`): an NNUE evaluation (9216 king-bucketed inputs → 256×2 → 32 → 32 → 1, weights in `src/lib/neural/depth5.nnue`, 4.8 MB) on top of `lib/engine`'s `Position`, with iterative deepening, aspiration windows, PVS, a transposition table, killers + history, null move, LMR, check extension and quiescence. It searches until 3 s per move (hard stop at +25%). The weights are read and checksummed on first use (~10 ms) and the engine stays warm for the server instance; `next.config.ts` traces the file into the tick, start and move routes. Tests (`neural.test.ts`) check it against the Python evaluator on 1,000 positions (fixture from `scripts/dump_nnue_fixture.py` in ML-AI), the incremental accumulator, colour symmetry, corrupt weights and move legality under the deadline.
 
 ## Front end
 

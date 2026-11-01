@@ -19,6 +19,7 @@ export const ROSTER: Array<{ id: string; name: string; provider: string }> = [
   { id: "local/greedy", name: "Greedy Grabber", provider: "local" },
   { id: "local/engine-2", name: "Arena Engine (depth 2)", provider: "local" },
   { id: "local/engine-4", name: "Arena Engine (depth 4)", provider: "local" },
+  { id: "local/neural", name: "depth 5", provider: "local" },
   // Human vs AI: whoever started the match (games.started_by) plays this side. Never rated.
   { id: "human", name: "Human", provider: "human" },
 
