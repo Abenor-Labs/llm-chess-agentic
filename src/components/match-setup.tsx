@@ -14,6 +14,8 @@ import { Board } from "./board";
 import { useSessionUser } from "./user-menu";
 import { RatedChip, SideDot } from "./badges";
 
+const HUMAN_PLAYER: Model = { id: HUMAN_ID, name: "Human", provider: "human", elo: 1500, gamesPlayed: 0, wins: 0, losses: 0, draws: 0, active: true };
+
 type KeyState = "built-in" | "browser" | "server" | "missing";
 
 const PROVIDER_ORDER: ProviderId[] = ["local", "groq", "google", "anthropic", "openai", "subq", "gateway"];
@@ -60,8 +62,10 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
 
   const playable = useMemo(() => models.filter((m) => m.active), [models]);
   const { user } = useSessionUser();
-  const white = playable.find((m) => m.id === whiteId) ?? null;
-  const black = playable.find((m) => m.id === blackId) ?? null;
+  // The leaderboard API hides the "human" row, so the setup supplies it itself.
+  const pick = (id: string | null) => (id === HUMAN_ID ? HUMAN_PLAYER : (playable.find((m) => m.id === id) ?? null));
+  const white = pick(whiteId);
+  const black = pick(blackId);
   const missing = [white, black]
     .filter((m): m is Model => Boolean(m))
     .map((m) => providerOf(m.id))
