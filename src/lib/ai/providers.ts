@@ -39,7 +39,7 @@ export function resolveKey(provider: KeyedProvider, keys?: ApiKeys): string | un
 }
 
 export function timeoutFor(provider: ProviderId, effort: Effort): number {
-  if (provider === "local") return AI_TIMEOUTS.MAX_MS;
+  if (provider === "local" || provider === "human") return AI_TIMEOUTS.MAX_MS;
   const base = AI_TIMEOUTS.BASE_MS[provider];
   return Math.min(AI_TIMEOUTS.MAX_MS, Math.round(base * AI_TIMEOUTS.EFFORT_MULTIPLIER[effort]));
 }
@@ -148,7 +148,7 @@ export function planCall(
   opts: { effort: Effort; temperature: number; keys?: ApiKeys },
 ): CallPlan {
   const provider = providerOf(modelId);
-  if (provider === "local") throw new Error(`${modelId} is a built-in engine, not a language model`);
+  if (provider === "local" || provider === "human") throw new Error(`${modelId} is not a language model`);
   const name = providerModelName(modelId);
   const providerOptions = effortOptions(modelId, opts.effort);
   const timeoutMs = timeoutFor(provider, opts.effort);

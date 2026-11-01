@@ -2,15 +2,19 @@ import { db } from "@/db";
 import { games, models, moves, publicGameColumns } from "@/db/schema";
 import { asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { isRatedPairing } from "./modes";
+import { isHuman } from "./provider-ids";
 import type { GameDetailResponse, GameListItem, GameStatus, PublicGame } from "@/types/api";
 
 type PublicRow = { [K in keyof typeof publicGameColumns]: unknown } & {
+  whiteId: string;
+  blackId: string;
   whiteMode: string;
   blackMode: string;
 };
 
 export function toPublicGame<T extends PublicRow>(row: T): T & { rated: boolean } {
-  return { ...row, rated: isRatedPairing(row.whiteMode, row.blackMode) };
+  // Human games never move ratings, whatever the modes.
+  return { ...row, rated: !isHuman(row.whiteId) && !isHuman(row.blackId) && isRatedPairing(row.whiteMode, row.blackMode) };
 }
 
 /** Games by status, newest first, with both models and a move count. */

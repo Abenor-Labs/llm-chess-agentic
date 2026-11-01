@@ -5,6 +5,7 @@ import type { Model, Move } from "@/db/schema";
 import { classifyMove, formatDuration, judgeSummary, sideAccuracy } from "@/lib/view-model";
 import { describeJudgeEvent } from "@/lib/judge-types";
 import { modeConfig } from "@/lib/modes";
+import { isHuman } from "@/lib/provider-ids";
 import { cn } from "@/lib/utils";
 import { ModeChip, MoveClassChip, ProviderChip, SideDot } from "./badges";
 import { ThinkingDots } from "./thinking";
@@ -45,7 +46,7 @@ export function PlayerCards({ players, moves, toMove }: { players: Players; move
             </p>
             <div className="mt-1.5 flex flex-wrap gap-1">
               <ProviderChip modelId={model.id} />
-              <ModeChip mode={color === "white" ? players.whiteMode : players.blackMode} />
+              {!isHuman(model.id) && <ModeChip mode={color === "white" ? players.whiteMode : players.blackMode} />}
             </div>
             <p className="mt-1.5 text-[11px] tabular-nums text-slate-500" data-testid={`accuracy-${color}`}>
               {model.elo} ELO
@@ -92,7 +93,7 @@ export function Commentary({
       <SideDot color={c} />
       <span className="truncate font-semibold text-slate-900">{players[c].name}</span>
       <span className="shrink-0 text-slate-400">
-        {SIDE[c]} · {modeConfig(c === "white" ? players.whiteMode : players.blackMode).label}
+        {SIDE[c]} · {isHuman(players[c].id) ? "Human" : modeConfig(c === "white" ? players.whiteMode : players.blackMode).label}
       </span>
     </span>
   );

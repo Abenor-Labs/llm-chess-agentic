@@ -5,7 +5,7 @@ import type { Model } from "@/db/schema";
 import { useLeaderboard } from "@/contexts/leaderboard-context";
 import { useSettings } from "@/contexts/settings-context";
 import { SKILL_MODES, isRatedPairing, type SkillMode } from "@/lib/modes";
-import { KEYED_PROVIDERS, PROVIDER_LABEL, isKeyedProvider, providerOf, type KeyedProvider, type ProviderId } from "@/lib/provider-ids";
+import { HUMAN_ID, KEYED_PROVIDERS, PROVIDER_LABEL, isHuman, isKeyedProvider, providerOf, type KeyedProvider, type ProviderId } from "@/lib/provider-ids";
 import { KEYS_CHANGED_EVENT, readAllKeys } from "@/lib/client-keys";
 import { STARTING_FEN } from "@/lib/chess";
 import { cn } from "@/lib/utils";
@@ -126,13 +126,26 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
     if (id) onStarted(id);
   }
 
-  const rated = isRatedPairing(whiteMode, blackMode);
+  const vsHuman = whiteId === HUMAN_ID || blackId === HUMAN_ID;
+  const rated = !vsHuman && isRatedPairing(whiteMode, blackMode);
+  const label = (m: Model | null, fallback: string) => (m ? (isHuman(m.id) ? "You" : m.name) : fallback);
+  // Only one side can be you; picking it again hands that side back to an AI.
+  function playSide(color: "white" | "black") {
+    setError(null);
+    if (color === "white") {
+      setWhiteId(whiteId === HUMAN_ID ? null : HUMAN_ID);
+      if (blackId === HUMAN_ID) setBlackId(null);
+    } else {
+      setBlackId(blackId === HUMAN_ID ? null : HUMAN_ID);
+      if (whiteId === HUMAN_ID) setWhiteId(null);
+    }
+  }
 
   return (
     <div className="mx-auto grid w-full max-w-[1400px] gap-4 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,400px)_minmax(0,1fr)]">
       <div className="lg:col-span-3">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">Set up a match</h1>
-        <p className="mt-1 text-sm text-slate-500">Pick a model for White and for Black, then start. Built-in engines need no API key.</p>
+        <p className="mt-1 text-sm text-slate-500">Pick a model for each side, or play one side yourself. Built-in engines need no API key.</p>
       </div>
       <SideSetup
         color="white"
@@ -146,6 +159,7 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
         onMode={fresh(setWhiteMode)}
         disabledId={whiteMode === blackMode ? blackId : null}
         keyState={keyState}
+        onPlaySide={() => playSide("white")}
       />
 
       <div className="order-last flex flex-col gap-4 lg:sticky lg:top-20 lg:order-none lg:self-start">
@@ -157,11 +171,11 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
             <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 text-sm" aria-live="polite">
               <span className="flex min-w-0 items-center gap-1.5">
                 <SideDot color="white" />
-                <span className={cn("truncate font-medium", !white && "text-slate-400")}>{white?.name ?? "Pick White"}</span>
+                <span className={cn("truncate font-medium", !white && "text-slate-400")}>{label(white, "Pick White")}</span>
               </span>
               <span className="text-xs text-slate-400">vs</span>
               <span className="flex min-w-0 items-center justify-end gap-1.5">
-                <span className={cn("truncate font-medium", !black && "text-slate-400")}>{black?.name ?? "Pick Black"}</span>
+                <span className={cn("truncate font-medium", !black && "text-slate-400")}>{label(black, "Pick Black")}</span>
                 <SideDot color="black" />
               </span>
             </div>
@@ -174,11 +188,15 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
               )}
               data-testid="start-match"
             >
-              {starting ? `${white?.name ?? "White"} is choosing the first move…` : user ? "Start match" : "Sign in to start a match"}
+              {starting ? (white && !isHuman(white.id) ? `${white.name} is choosing the first move…` : "Starting…") : user ? "Start match" : "Sign in to start a match"}
             </button>
             <p className="flex items-center justify-center gap-2 text-xs text-slate-500">
               <RatedChip rated={rated} />
-              {rated ? "Same skill mode: the result moves ELO." : "Different skill modes: counts in W/L/D, ELO stays put."}
+              {vsHuman
+                ? "You vs AI: just for fun, the leaderboard doesn't change."
+                : rated
+                  ? "Same skill mode: the result moves ELO."
+                  : "Different skill modes: counts in W/L/D, ELO stays put."}
             </p>
             {!white || !black ? (
               <div className="border-t border-slate-100 pt-3 text-center">
@@ -231,6 +249,7 @@ export function MatchSetup({ onStarted }: { onStarted: (gameId: string) => void 
         onMode={fresh(setBlackMode)}
         disabledId={whiteMode === blackMode ? whiteId : null}
         keyState={keyState}
+        onPlaySide={() => playSide("black")}
       />
     </div>
   );
@@ -248,6 +267,7 @@ function SideSetup({
   onMode,
   disabledId,
   keyState,
+  onPlaySide,
 }: {
   color: "white" | "black";
   models: Model[];
@@ -260,6 +280,7 @@ function SideSetup({
   onMode: (m: SkillMode) => void;
   disabledId: string | null;
   keyState: (provider: ProviderId) => KeyState;
+  onPlaySide: () => void;
 }) {
   const [query, setQuery] = useState("");
   const groups = useMemo(() => {
@@ -277,7 +298,31 @@ function SideSetup({
       <header className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
         <SideDot color={color} />
         <h2 className="text-sm font-semibold capitalize text-slate-900">{color}</h2>
+        <button
+          onClick={onPlaySide}
+          className={cn(
+            "ml-auto rounded-lg px-2.5 py-1 text-xs font-medium ring-1 transition-colors",
+            selected === HUMAN_ID ? "text-slate-700 ring-slate-200 hover:bg-slate-50" : "bg-rose-50 text-rose-800 ring-rose-200 hover:bg-rose-100",
+          )}
+          aria-pressed={selected === HUMAN_ID}
+          data-testid={`play-${color}`}
+        >
+          {selected === HUMAN_ID ? "Let an AI play" : `Play ${color} myself`}
+        </button>
       </header>
+
+      {selected === HUMAN_ID ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+          <span className="text-3xl" aria-hidden>
+            ☺
+          </span>
+          <p className="text-sm font-semibold text-slate-900">You play {color}</p>
+          <p className="max-w-xs text-xs text-slate-500">
+            Drag pieces on the board when it&apos;s your turn. Pick the AI on the other side, then start.
+          </p>
+        </div>
+      ) : (
+      <>
 
       <div className="space-y-3 border-b border-slate-100 p-3">
         <div>
@@ -369,6 +414,8 @@ function SideSetup({
           </div>
         ))}
       </div>
+      </>
+      )}
     </section>
   );
 }

@@ -113,6 +113,7 @@ export const publicGameColumns = {
   blackMode: games.blackMode,
   analyzed: games.analyzed,
   statusNote: games.statusNote,
+  startedBy: games.startedBy,
 };
 
 export type Model = typeof models.$inferSelect;

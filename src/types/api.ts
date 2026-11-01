@@ -27,6 +27,10 @@ export const StartGameRequestSchema = z
   .refine((data) => data.modelIds[0] !== data.modelIds[1] || (data.whiteMode ?? "scholar") !== (data.blackMode ?? "scholar"), {
     message: "To pit a model against itself, give each side a different skill mode",
     path: ["modelIds"],
+  })
+  .refine((data) => !(data.modelIds[0] === "human" && data.modelIds[1] === "human"), {
+    message: "At least one side must be an AI",
+    path: ["modelIds"],
   });
 export type StartGameRequest = z.infer<typeof StartGameRequestSchema>;
 

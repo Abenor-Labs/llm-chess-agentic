@@ -18,6 +18,7 @@ import { ThinkingDots } from "./thinking";
 import { useSessionUser } from "./user-menu";
 import { Commentary, PlayerCards } from "./commentary";
 import { modeConfig } from "@/lib/modes";
+import { isHuman } from "@/lib/provider-ids";
 
 const PIECE_GLYPH: Record<string, string> = { q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
 
@@ -46,11 +47,45 @@ export function GameView({ gameId, onNewGame, onGone }: GameViewProps) {
   const plies = useMemo(() => buildPlies(moves), [moves]);
   const { shownCount, caughtUp, skipToEnd } = useGamePlayback(moves, game?.id);
   const [cursor, setCursor] = useState<number | null>(null);
-  const [orientation, setOrientation] = useState<"white" | "black">("white");
   const shown = Math.min(cursor ?? shownCount, plies.length);
   const following = cursor === null || cursor >= plies.length;
   const fen = fenAt(plies, shown);
   const ply = shown > 0 ? plies[shown - 1] : null;
+
+  // Human vs AI: the player who started the match moves on the board.
+  const { user } = useSessionUser();
+  const humanColor = game ? (isHuman(game.whiteId) ? "white" : isHuman(game.blackId) ? "black" : null) : null;
+  const isMine = Boolean(humanColor && user && game?.startedBy === user.id);
+  const latestTurn = (fenAt(plies, plies.length).split(" ")[1] ?? "w") === "w" ? "white" : "black";
+  const myTurn = Boolean(live && isMine && latestTurn === humanColor && following && caughtUp);
+  const [pending, setPending] = useState<{ fen: string; at: number } | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
+  // Show the submitted move until playback reaches it, so the piece never jumps back.
+  const boardFen = pending && shown <= pending.at ? pending.fen : fen;
+  const [orientationChoice, setOrientation] = useState<"white" | "black" | null>(null);
+  const orientation = orientationChoice ?? (isMine && humanColor ? humanColor : "white");
+  const flip = useCallback(() => setOrientation(orientation === "white" ? "black" : "white"), [orientation]);
+
+  async function submitMove(uci: string, fenAfter: string) {
+    if (!game) return;
+    setPending({ fen: fenAfter, at: plies.length });
+    setMoveError(null);
+    const res = await fetch(`/api/games/${game.id}/move`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ move: uci }),
+    }).catch(() => null);
+    if (!res?.ok) {
+      setPending(null);
+      setMoveError((await res?.json().catch(() => null))?.error ?? "Couldn't send your move. Try again.");
+      return;
+    }
+    await refetch();
+    // Ask for the AI's reply now instead of waiting for the next auto-tick.
+    void fetch("/api/cron/tick", { method: "POST" })
+      .then(() => refetch())
+      .catch(() => {});
+  }
 
   const goTo = useCallback(
     (n: number) => {
@@ -71,13 +106,13 @@ export function GameView({ gameId, onNewGame, onGone }: GameViewProps) {
       else if (e.key === "ArrowRight") goTo(shown + 1);
       else if (e.key === "Home") goTo(0);
       else if (e.key === "End") goTo(plies.length);
-      else if (e.key.toLowerCase() === "f") setOrientation((o) => (o === "white" ? "black" : "white"));
+      else if (e.key.toLowerCase() === "f") flip();
       else return;
       e.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [goTo, shown, plies.length]);
+  }, [goTo, shown, plies.length, flip]);
 
   // A sound for each move as playback reveals it (not when browsing history).
   const lastSounded = useRef<{ game?: string; count: number }>({ count: 0 });
@@ -168,7 +203,9 @@ export function GameView({ gameId, onNewGame, onGone }: GameViewProps) {
               <div className="aspect-square min-w-0 flex-1" data-testid="board" data-fen={fen}>
                 <Board
                   id={`game-${game.id}`}
-                  fen={fen}
+                  fen={boardFen}
+                  movable={myTurn ? humanColor : null}
+                  onMove={submitMove}
                   orientation={orientation}
                   lastMove={ply ? { from: ply.from, to: ply.to } : null}
                   checkSquare={ply?.checkSquare ?? null}
@@ -184,8 +221,13 @@ export function GameView({ gameId, onNewGame, onGone }: GameViewProps) {
             following={following && caughtUp}
             live={live}
             onGo={goTo}
-            onFlip={() => setOrientation((o) => (o === "white" ? "black" : "white"))}
+            onFlip={flip}
           />
+          {isMine && live && (
+            <p className={cn("text-sm", moveError ? "text-rose-600" : "text-slate-600")} role="status" data-testid="human-turn">
+              {moveError ?? (myTurn ? "Your move: drag a piece." : latestTurn === humanColor ? "Catching up…" : "Waiting for the AI's reply…")}
+            </p>
+          )}
         </div>
 
         <aside className="flex min-w-0 flex-col gap-3 lg:sticky lg:top-[4.5rem] lg:max-h-[calc(100dvh-5.5rem)]">
@@ -246,7 +288,7 @@ function PlayerBar({
       <span className="min-w-0 flex-1">
         <span className="block truncate font-semibold leading-tight text-slate-900">{model.name}</span>
         <span className="block text-[11px] leading-tight text-slate-500">
-          {color === "white" ? "White" : "Black"} · {modeConfig(mode).label}
+          {color === "white" ? "White" : "Black"} · {isHuman(model.id) ? "Human" : modeConfig(mode).label}
         </span>
       </span>
       {winner && (

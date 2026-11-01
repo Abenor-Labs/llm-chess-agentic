@@ -9,6 +9,7 @@ import { GET as listGames } from "@/app/api/games/route";
 import { GET as gameDetail } from "@/app/api/games/[id]/route";
 import { POST as analysis } from "@/app/api/games/[id]/analysis/route";
 import { POST as destroy } from "@/app/api/games/destroy/route";
+import { POST as humanMove } from "@/app/api/games/[id]/move/route";
 import { GET as leaderboard } from "@/app/api/leaderboard/route";
 import { GET as accuracy } from "@/app/api/analytics/accuracy/route";
 import { GAME_RULES } from "@/lib/config";
@@ -241,6 +242,39 @@ describe.skipIf(!hasDb)("API routes (real database)", () => {
       expect(detail.white.id).toBe("local/random");
       expect((await gameDetail(get(""), params("00000000-0000-4000-8000-000000000000"))).status).toBe(404);
       expect((await gameDetail(get(""), params("not-a-uuid"))).status).toBe(404);
+    });
+  });
+
+  describe("Human vs AI", () => {
+    const me = { id: "u-player", email: "p@test", name: "Player", role: "user" };
+    const move = (id: string, m: string) => humanMove(jsonRequest(`/api/games/${id}/move`, { move: m }), params(id));
+
+    it("waits for the human, accepts only the starter's legal moves, then the AI replies", async () => {
+      session.user = me;
+      const started = await (await start(jsonRequest("/api/games/start", { modelIds: ["human", "local/greedy"] }))).json();
+      expect(await getMoves(started.gameId)).toHaveLength(0); // White is the human: no AI ply at start
+      await processGame({ id: started.gameId }, 0);
+      expect(await getMoves(started.gameId)).toHaveLength(0); // ticks wait on the human
+
+      session.user = { ...me, id: "u-other" };
+      expect((await move(started.gameId, "e2e4")).status).toBe(403);
+      session.user = me;
+      expect((await move(started.gameId, "e2e5")).status).toBe(400);
+      expect((await move(started.gameId, "e2e4")).status).toBe(200);
+      expect((await move(started.gameId, "d2d4")).status).toBe(409); // not your turn
+
+      await processGame({ id: started.gameId }, 0);
+      const plies = await getMoves(started.gameId);
+      expect(plies.map((p) => p.color)).toEqual(["white", "black"]);
+      expect(plies[0]).toMatchObject({ moveSan: "e4", modelId: "human" });
+    });
+
+    it("never touches ratings or counters", async () => {
+      session.user = me;
+      const started = await (await start(jsonRequest("/api/games/start", { modelIds: ["local/greedy", "human"] }))).json();
+      await endGame(started.gameId, "1-0", "Checkmate");
+      expect(await getModel("local/greedy")).toMatchObject({ elo: 1500, gamesPlayed: 0, wins: 0 });
+      expect((await start(jsonRequest("/api/games/start", { modelIds: ["human", "human"], whiteMode: "novice" }))).status).toBe(400);
     });
   });
 

@@ -7,6 +7,7 @@ export const PROVIDER_STYLE: Record<ProviderId, { dot: string; chip: string; gly
   anthropic: { dot: "bg-amber-600", chip: "bg-amber-50 text-amber-900 ring-amber-200", glyph: "✳" },
   openai: { dot: "bg-emerald-600", chip: "bg-emerald-50 text-emerald-800 ring-emerald-200", glyph: "◎" },
   subq: { dot: "bg-cyan-600", chip: "bg-cyan-50 text-cyan-800 ring-cyan-200", glyph: "◇" },
+  human: { dot: "bg-rose-500", chip: "bg-rose-50 text-rose-800 ring-rose-200", glyph: "☺" },
   local: { dot: "bg-slate-500", chip: "bg-slate-100 text-slate-700 ring-slate-200", glyph: "♞" },
   gateway: { dot: "bg-violet-500", chip: "bg-violet-50 text-violet-800 ring-violet-200", glyph: "✦" },
 };

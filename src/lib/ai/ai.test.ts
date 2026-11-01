@@ -229,7 +229,8 @@ describe("providers", () => {
   it("throws APIKeyError when a key is missing, and refuses local engines", () => {
     delete process.env.GEMINI_API_KEY;
     expect(() => planCall("google/models/gemini-3.5-flash", { effort: "low", temperature: 0.5 })).toThrow(APIKeyError);
-    expect(() => planCall("local/engine-3", { effort: "low", temperature: 0.5 })).toThrow(/built-in/);
+    expect(() => planCall("local/engine-3", { effort: "low", temperature: 0.5 })).toThrow(/not a language model/);
+    expect(() => planCall("human", { effort: "low", temperature: 0.5 })).toThrow(/not a language model/);
   });
 });
 

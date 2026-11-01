@@ -1,10 +1,12 @@
 import { db } from "@/db";
-import { games, moves, models, type Game } from "@/db/schema";
+import type { Chess } from "chess.js";
+import { games, moves, models, type Game, type Move } from "@/db/schema";
 import { and, asc, desc, eq, isNull, lt, or, like, sql } from "drizzle-orm";
-import { loadGame, gameStatus, toPgn, getMoveNumber, type GameResult } from "./chess";
+import { loadGame, gameStatus, toPgn, getMoveNumber, resolveMove, type GameResult } from "./chess";
 import { adjudicate } from "./engine";
 import { playTurn } from "./players";
 import { providerOf, isKeyedProvider, resolveKey, PROVIDER_LABEL, type ApiKeys } from "./ai";
+import { isHuman } from "./provider-ids";
 import { calculateNewElo, outcomeFromResult } from "./elo";
 import { isRatedPairing } from "./modes";
 import { GAME_RULES } from "./config";
@@ -147,6 +149,9 @@ async function playOnePly(gameId: string, summary: ProcessSummary): Promise<PlyO
   const keys = gameKeys(game);
   const provider = providerOf(modelId);
 
+  // The human moves through POST /api/games/[id]/move; ticks just wait.
+  if (isHuman(modelId)) return "stop";
+
   // A missing key is a setup failure, not a chess result.
   if (isKeyedProvider(provider) && !resolveKey(provider, keys)) {
     await cancelOrAbort(history.length, `${side} has no ${PROVIDER_LABEL[provider]} API key`);
@@ -192,6 +197,20 @@ async function playOnePly(gameId: string, summary: ProcessSummary): Promise<PlyO
     clearTimeout(timer);
   }
 
+  return recordPly(game, chess, color, modelId, turn);
+}
+
+
+interface PlyRecord {
+  san: string;
+  reasoning: string;
+  plan: string | null;
+  judge: Move["judge"];
+  thinkMs: number;
+}
+
+/** Applies one ply to the board and the moves table, then ends the game if it is over. */
+async function recordPly(game: Game, chess: Chess, color: Color, modelId: string, turn: PlyRecord): Promise<PlyOutcome> {
   const moveNumber = getMoveNumber(chess.fen());
   chess.move(turn.san);
   const fenAfter = chess.fen();
@@ -234,6 +253,45 @@ async function playOnePly(gameId: string, summary: ProcessSummary): Promise<PlyO
   return "moved";
 }
 
+export type HumanMoveResult = { ok: true; outcome: PlyOutcome } | { ok: false; status: number; error: string };
+
+/**
+ * A move from the person who started a Human vs AI match. Only that user, only
+ * on the human's turn, only a legal move; written with the same guards as an AI
+ * ply, so it can't race a tick or a stop.
+ */
+export async function playHumanMove(gameId: string, userId: string, raw: string): Promise<HumanMoveResult> {
+  const [game] = await db.select().from(games).where(eq(games.id, gameId));
+  if (!game || game.status !== "active") return { ok: false, status: 409, error: "This game is not running." };
+  if (game.startedBy !== userId) return { ok: false, status: 403, error: "Only the player who started this match can move." };
+
+  const history = await moveHistory(game.id);
+  const chess = loadGame(game.fen, history.map((m) => m.moveSan));
+  const color: Color = chess.turn() === "w" ? "white" : "black";
+  const modelId = color === "white" ? game.whiteId : game.blackId;
+  if (!isHuman(modelId)) return { ok: false, status: 409, error: "It's not your turn." };
+
+  const resolved = resolveMove(chess.fen(), raw);
+  if (!resolved) return { ok: false, status: 400, error: `${raw} is not a legal move here.` };
+
+  const last = await db
+    .select({ at: moves.createdAt })
+    .from(moves)
+    .where(eq(moves.gameId, game.id))
+    .orderBy(desc(moves.createdAt))
+    .limit(1);
+  const since = new Date(last[0]?.at ?? game.startedAt).getTime();
+  const outcome = await recordPly(game, chess, color, modelId, {
+    san: resolved.san,
+    reasoning: "Played by a human.",
+    plan: null,
+    judge: { attempts: 1, events: [] },
+    thinkMs: Math.max(0, Date.now() - since),
+  });
+  if (outcome === "stop") return { ok: false, status: 409, error: "The position changed. Refresh and try again." };
+  return { ok: true, outcome };
+}
+
 /** Deletes a game and its moves. For matches that never really started. */
 export async function abortGame(gameId: string): Promise<void> {
   await db.transaction(async (tx) => {
@@ -259,7 +317,8 @@ export async function endGame(gameId: string, result: GameResult | null, reason:
       .where(and(eq(games.id, gameId), eq(games.status, "active")))
       .returning();
     if (!ended) return false;
-    if (!result || ended.whiteId === ended.blackId) return true;
+    // Self-play and Human vs AI games are recorded but never touch the leaderboard.
+    if (!result || ended.whiteId === ended.blackId || isHuman(ended.whiteId) || isHuman(ended.blackId)) return true;
     const rated = isRatedPairing(ended.whiteMode, ended.blackMode);
 
     // Lock both rating rows in a fixed order to avoid deadlocks.
