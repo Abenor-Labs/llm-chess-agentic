@@ -19,6 +19,7 @@ A throwaway Postgres for tests: `docker compose up -d` (port 5434), or any local
 - **Moves from models go through `resolveMove`** — store the canonical SAN it returns, never the model's raw string.
 - **Never write to the game without the guards**: position updates are conditional on the FEN the move was computed for and `status = 'active'`; `endGame` is the only way to finish a game (transactional, idempotent, rates only `isRatedPairing` games with a result).
 - **Search with `lib/engine`, not chess.js** (chess.js generates SAN + check info per move and is ~1000× too slow). The engine is perft-tested; keep `src/lib/engine/engine.test.ts` green when touching it.
+- **Built-in bots** (`LOCAL_BOTS` in `src/lib/players.ts`, rows in `src/db/seed.ts`): `local/random`, `local/greedy`, `local/engine-2`, `local/engine-4` (the rating anchor: never change it) and `local/neural` ("depth 5", the NNUE engine in `src/lib/neural`; its weights `depth5.nnue` must stay in `outputFileTracingIncludes` in `next.config.ts`).
 - **Client code must not import `@/lib/ai`** (it pulls provider SDKs). Use `@/lib/provider-ids` for provider metadata.
 - **Route segment config must be literal** (`export const maxDuration = 300`). `tests/api.test.ts` asserts it matches `GAME_RULES.TICK_MAX_DURATION_S`.
 - New DB columns: add to `src/db/schema.ts` **and** a new idempotent `drizzle/00NN_*.sql` (`IF NOT EXISTS`, guarded `DO` blocks).

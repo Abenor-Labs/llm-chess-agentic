@@ -3,6 +3,7 @@ import { requestMove, providerOf, type ApiKeys } from "./ai";
 import { judgeMove } from "./judge";
 import { revisitsPosition } from "./chess";
 import { analyze, formatScore, pickEngineMove } from "./engine";
+import { neuralMove } from "./neural";
 import { modeConfig, type SkillMode } from "./modes";
 import { ENGINE } from "./config";
 import type { JudgeRecord } from "./judge-types";
@@ -17,6 +18,8 @@ export const LOCAL_BOTS: Record<string, { name: string; depth: number; noiseCp: 
   "local/greedy": { name: "Greedy Grabber", depth: 1, noiseCp: 0, maxMs: 500, blurb: "Grabs material: one ply plus capture search." },
   "local/engine-2": { name: "Arena Engine (depth 2)", depth: 2, noiseCp: 25, maxMs: 1_500, blurb: "Two-ply alpha-beta with quiescence." },
   "local/engine-4": { name: "Arena Engine (depth 4)", depth: 4, noiseCp: 0, maxMs: 3_000, blurb: "Four-ply alpha-beta with quiescence." },
+  // depth is unused here: the NNUE engine deepens until maxMs (src/lib/neural).
+  "local/neural": { name: "depth 5", depth: -1, noiseCp: 0, maxMs: 3_000, blurb: "NNUE evaluation with a full alpha-beta search." },
 };
 
 export interface TurnInput {
@@ -103,6 +106,19 @@ function playLocal(input: TurnInput): Omit<TurnResult, "thinkMs"> {
       reasoning: `Picked at random from ${moves.length} legal moves.`,
       plan: null,
       judge: { attempts: 1, events: [] },
+    };
+  }
+
+  if (input.modelId === "local/neural") {
+    const history = input.chess.history({ verbose: true }).map((m) => m.before);
+    const { san, uci, info } = neuralMove(fen, history, bot.maxMs);
+    const score = formatScore(info.score);
+    return {
+      san,
+      uci,
+      reasoning: `Searched ${info.nodes.toLocaleString("en-US")} positions to depth ${info.depth} with the depth 5 NNUE; ${san} scores ${score}.`,
+      plan: null,
+      judge: { attempts: 1, events: [], engine: { depth: info.depth, nodes: info.nodes, score } },
     };
   }
 
